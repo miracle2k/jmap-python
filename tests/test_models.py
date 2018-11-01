@@ -4,7 +4,8 @@ from jmap.server import CustomJSONEncoder
 
 
 def test_mailbox_get_args():
-    mailbox = MailboxGetArgs(account_id=3)
+    mailbox = MailboxGetArgs.unmarshal({
+        'accountId': '13824', 'properties': ['threadId'], 'ids': []})
 
 
 def test_mailbox_get_response():

@@ -190,6 +190,16 @@ class EmailGetResponse(StandardGetResponse):
 
 
 @model
+class ThreadGetArgs(StandardGetArgs):
+    pass
+
+
+@model
+class ThreadGetResponse(StandardGetResponse):
+    pass
+
+
+@model
 class EmailQueryArgs(StandardQueryArgs):
     """
     "4.4 /query" (https://jmap.io/spec-mail.html#email/query)
@@ -255,3 +265,10 @@ class JMapResponse:
         return {
             'methodResponses': self.method_responses
         }
+
+
+@model
+class ResultReference:
+    result_of: str
+    name: str
+    path: str

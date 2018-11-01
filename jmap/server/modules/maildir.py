@@ -2,7 +2,7 @@ import mailbox
 
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, Mailbox, EmailQueryArgs, EmailQueryResponse, \
-    EmailGetArgs, EmailGetResponse
+    EmailGetArgs, EmailGetResponse, ThreadGetArgs, ThreadGetResponse
 
 
 class MailboxEmailModule(EmailModule):
@@ -37,7 +37,7 @@ class MboxModule(EmailModule):
         )
 
     def handle_email_query(self, context, args: EmailQueryArgs) -> EmailQueryResponse:
-        EmailQueryResponse(
+        return EmailQueryResponse(
             account_id=args.account_id,
             collapse_threads=args.collapse_threads,
             query_state='none',
@@ -47,4 +47,17 @@ class MboxModule(EmailModule):
         )
 
     def handle_email_get(self, context, args: EmailGetArgs) -> EmailGetResponse:
-        pass
+        return EmailGetResponse(
+            account_id=args.account_id,
+            state=self.get_state_for(Mailbox),
+            list=[],
+            not_found=[]
+        )
+
+    def handle_thread_get(self, context, args: ThreadGetArgs) -> ThreadGetResponse:
+        return ThreadGetResponse(
+            account_id=args.account_id,
+            state=self.get_state_for(Mailbox),
+            list=[],
+            not_found=[]
+        )

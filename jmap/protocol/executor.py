@@ -1,14 +1,29 @@
 """
 Knows how to execute a JMAP request.
 """
-
-from typing import List
+from collections import defaultdict
+from typing import List, Dict, Any
 from jmap.protocol.core import JmapModuleInterface, JMapError
-from jmap.protocol.models import JMapRequest, JMapResponse
+from jmap.protocol.jsonpointer import resolve_pointer
+from jmap.protocol.models import JMapRequest, JMapResponse, ResultReference
 
 
 class MethodNotFound(JMapError):
     pass
+
+
+def resolve_reference(ref: ResultReference, db: Dict[str, Dict[str, Any]]):
+    if not ref.result_of in db:
+        raise ValueError('Not found a previous method call with id {}'.format(ref.result_of))
+    responses = db[ref.result_of]
+
+    if not ref.name in responses:
+        raise ValueError('Previous method call with id {} has no response named {}'.format(
+            ref.result_of, ref.name))
+
+    response = responses[ref.name]
+
+    return resolve_pointer(response.marshal(), ref.path)
 
 
 class Executor:
@@ -32,14 +47,30 @@ class Executor:
     def execute(self, request: JMapRequest):
         method_responses = []
 
+        # Keep previous responses to allow references
+        responses_by_client_id = defaultdict(lambda: {})
+
         for method_call in request.method_calls:
+            # Find the right module
             if not method_call.name in self.available_methods:
                 raise MethodNotFound(method_call.name)
-
             module = self.available_methods[method_call.name]
 
+            # Resolve any references to previous responses
+            args = method_call.args
+            for arg_name in list(args.keys()):
+                if arg_name.startswith('#'):
+                    ref = ResultReference.unmarshal(args[arg_name])
+                    new_value = resolve_reference(ref, responses_by_client_id)
+                    args[arg_name[1:]] = new_value
+                    del args[arg_name]
+
             # Execute the call
-            result = module.execute(method_call.name, method_call.args)
+            result = module.execute(method_call.name, args)
+
+            # Index it
+            responses_by_client_id[method_call.client_id][method_call.name] = result
+
             method_responses.append(
                 [
                     method_call.name,

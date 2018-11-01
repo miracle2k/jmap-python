@@ -11,7 +11,8 @@ What this does is:
 import functools
 import types
 from jmap.protocol.core import JmapBaseModule
-from jmap.protocol.models import MailboxGetArgs, EmailQueryArgs, EmailQueryResponse, EmailGetResponse, EmailGetArgs
+from jmap.protocol.models import MailboxGetArgs, EmailQueryArgs, EmailQueryResponse, EmailGetResponse, EmailGetArgs, \
+    ThreadGetArgs, ThreadGetResponse
 
 
 def check_get_perms(instance, auth_backend, typename, handler):
@@ -38,6 +39,7 @@ class EmailModule(JmapBaseModule):
             'Mailbox/get': check_get_perms(self, auth_backend, 'Mailbox', self.handle_mailbox_get),
             'Email/get': self.handle_email_get,
             'Email/query': self.handle_email_query,
+            'Thread/get': self.handle_thread_get
         }
 
     def handle_mailbox_get(self, context, args: MailboxGetArgs):
@@ -47,4 +49,7 @@ class EmailModule(JmapBaseModule):
         raise NotImplementedError()
 
     def handle_email_query(self, context, args: EmailQueryArgs) -> EmailQueryResponse:
+        raise NotImplementedError()
+
+    def handle_thread_get(self, context, args: ThreadGetArgs) -> ThreadGetResponse:
         raise NotImplementedError()
