@@ -109,6 +109,49 @@ class Mailbox:
 
 
 @model
+class EmailHeader:
+    pass
+
+
+@model
+class EmailBodyPart:
+    # 4.1.4 Body Parts
+    part_id: Optional[str] = None
+    blob_id: Optional[str] = None
+    size: int = PositiveInt()
+    headers: List[EmailHeader]
+    name: Optional[str] = None
+    type: str
+    charset: Optional[str] = None
+    disposition: Optional[str] = None
+    cid: Optional[str] = None
+    language: Optional[List[str]] = None
+    location: Optional[str] = None
+    # TODO sub_parts: Optional[List["EmailBodyPart"]] = None
+
+
+@model
+class Email:
+    # 4.1.1 Metadata
+    id: str
+    blob_id: str
+    threadId: str
+    #TODO mailbox_ids: Dict[str, bool]
+    #keywords: Dict[str, bool]
+    size: int = PositiveInt()
+    # TODO received_at
+
+    # 4.1.2 Header fields parsed forms
+    raw: str
+    text: str
+
+
+@model
+class Thread:
+    pass
+
+
+@model
 class Account:
     """
     See "2. The JMAP Session resource".
@@ -136,8 +179,8 @@ class StandardGetResponse:
     """
     account_id: str
     state: str
-    list: List[Mailbox]
     not_found: List[str]
+    #list: List[*]
 
 
 @model
@@ -176,7 +219,7 @@ class MailboxGetArgs(StandardGetArgs):
 
 @model
 class MailboxGetResponse(StandardGetResponse):
-    pass
+    list: List[Mailbox]
 
 
 @model
@@ -186,7 +229,7 @@ class EmailGetArgs(StandardGetArgs):
 
 @model
 class EmailGetResponse(StandardGetResponse):
-    pass
+    list: List[Email]
 
 
 @model
@@ -196,7 +239,7 @@ class ThreadGetArgs(StandardGetArgs):
 
 @model
 class ThreadGetResponse(StandardGetResponse):
-    pass
+    list: List[Thread]
 
 
 @model
