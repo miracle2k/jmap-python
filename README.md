@@ -16,4 +16,5 @@ Start a server:
 
 Echo call:
 
-   http POST localhost:5000/ using="" methodCalls:=' [[ "Core/echo", {"test": 5}]]  '
+    $ http GET localhost:5000/.well-known/jmap
+    $ http POST localhost:5000/ using="" methodCalls:=' [[ "Core/echo", {"test": 5}, 1]]  '

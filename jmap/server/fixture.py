@@ -1,0 +1,207 @@
+"""
+Data from https://github.com/jmapio/jmap-demo-webmail/blob/master/fixtures.js
+"""
+
+import datetime
+from jmap.protocol.mail import EmailModule
+
+
+class FixtureEmailModule(EmailModule):
+
+    def handle_mailbox_get(self, args):
+        return {
+            "state": 'asdf',
+            "accountId": "13824",
+            "list": [
+                {
+                    "id": 'm1',
+                    "name": 'Inbox',
+                    "role": 'inbox',
+                    "parentId": None,
+                    "sortOrder": 0,
+                    "isCollapsed": True,
+                    "hidden": 0,
+                    "totalEmails": 23,
+                    "unreadEmails": 8,
+                    "totalThreads": 23,
+                    "unreadThreads": 8
+                },
+                {
+                    "id": 'm2',
+                    "name": 'Drafts',
+                    "role": 'drafts',
+                    "sortOrder": 2,
+                    "parentId": None,
+                    "isCollapsed": True,
+                    "hidden": 0,
+                    "totalEmails": 142,
+                    "unreadEmails": 0,
+                    "totalThreads": 142,
+                    "unreadThreads": 0
+                },
+                {
+                    "id": 'm3',
+                    "name": 'Sent',
+                    "role": 'sent',
+                    "sortOrder": 5,
+                    "parentId": None,
+                    "isCollapsed": True,
+                    "hidden": 0,
+                    "totalEmails": 144,
+                    "unreadEmails": 5,
+                    "totalThreads": 144,
+                    "unreadThreads": 5
+                },
+                {
+                    "id": 'm4',
+                    "name": 'Archive',
+                    "role": 'archive',
+                    "sortOrder": 1,
+                    "parentId": None,
+                    "isCollapsed": True,
+                    "hidden": 0,
+                    "identityId": '5',
+                    "totalEmails": 24,
+                    "unreadEmails": 0,
+                    "totalThreads": 24,
+                    "unreadThreads": 0
+                },
+                {
+                    "id": 'm5',
+                    "name": 'Trash',
+                    "role": 'trash',
+                    "sortOrder": 20,
+                    "parentId": None,
+                    "isCollapsed": True,
+                    "hidden": 0,
+                    "identityId": '20',
+                    "totalEmails": 2,
+                    "unreadEmails": 0,
+                    "totalThreads": 2,
+                    "unreadThreads": 0
+                },
+                {
+                    "id": 'm6',
+                    "name": 'Spam',
+                    "role": 'junk',
+                    "sortOrder": 10,
+                    "parentId": None,
+                    "isCollapsed": True,
+                    "hidden": 0,
+                    "identityId": '100',
+                    "totalEmails": 1,
+                    "unreadEmails": 4,
+                    "totalThreads": 1,
+                    "unreadThreads": 4
+                },
+            ],
+            "notFound": None
+        }
+
+    def handle_email_query(self, args):
+        return {
+            "filter": args.get('filter'),
+            "sort": args.get('sort'),
+            "collapseThreads": args.get('ollapseThreads'),
+            "state": 'u123v42',
+            "canCalculateChanges": True,
+            "position": args.get('anchor'),
+            "total": 1000,
+            "ids": [],
+        }
+
+    def handle_email_get(self, args):
+        list = []
+
+        for id in args.get('ids'):
+            mail = {
+                "id": id,
+                "blobId": 'http://messages/' + id,
+                "cc": None,
+                "bcc": None,
+                "replyTo": [{
+                    "name": 'Neil Jenkins',
+                    "email": 'neil@replyto.com'
+                }],
+                "sentAt": datetime.datetime.utcnow(),
+                "htmlBody": """<div>asdfasdf<br></div><div>a<br></div><div>sdfasdf<br></div><div><br></div><div>asdf<br></div><div>asdf<br></div><div><br></div><div>asdf</div><div><br></div><div>On Fri, 20 Jan 2012, at 06:14 AM, Marian Hackett wrote:<br></div><blockquote><div><br></div><div><a href=\"https://bugs.opera.com/browse/IRIS-1199 target=\" defang__top\"=\"\" target=\"_blank\">https://bugs.opera.com/browse/IRIS-1199</a target=\"_blank\"><br></div><div><br></div><div><br></div><div>Marian Hackett updated IRIS-1199:<br></div><div>---------------------------------<br></div><div><br></div><div> &nbsp; Priority": P3&nbsp; (was: \u2014)<br></div><div> &nbsp; &nbsp; &nbsp; &nbsp; CC": [johan, marianh, neilj, rjlov, robm]<br></div><div><br></div><div><br></div><div><br></div><div>-- <br></div><div>This message is automatically generated by JIRA.<br></div><div><br></div><div><br></div><div><br></div></blockquote>\n""",
+                "textBody": """On Mon, 14 Mar 2011 13:58:04 +0100, Peter Krefting <peter@opera.com> wrote:\n\n> Conrad Newton <conrad.newton@opera.com>:\n>\n>> the only special item you have to watch out for is the deduction for  \n>> being a foreigner. This deduction is relevant only during your first  \n>> two years in Norway, and it will save you some money.\n>\n> Is it only two years now? Then someone should update  \n> https://wiki.oslo.osa/staffwiki/ExPats/Tax\n>\n\n\"This page was last modified on 12 October 2005, at 11:26.\"\n\nYes, it's been 2 years ever since 2006, in that case, since when I started  \nit was :) 2 years ;) and has stayed the same since. :) ;)\n\nThere's an email address here:\n\nblah@blah.com\n\nAnd a url with space:\n\n<http://somewhere.com/a url\"with spaces.txt>\n\nA regular url here": http://somewhere.com\n\n> Some indented\n> text here\n\nAnd *this* should be bold and _this_ should be underlined\n\nThis is an FTP link"": ftp://foo.example.com.\n\nWhat about _this_and_this_ which should all be underlined, and *all*of*this* should be bold\n\n\n-- \nDevil May Care\n_______________________________________________\nEx-pats mailing list\nEx-pats@list.opera.com\nhttps://list.opera.com/mailman/listinfo/ex-pats\n\n""",
+                "attachments": [
+                    {
+                        "name": 'file.doc',
+                        "size": 1421323,
+                        "blobId": 'atDOC',
+                        "isInline": False
+                    },
+                    {
+                        "name": 'file.xls',
+                        "size": 149150444123,
+                        "blobId": 'atXLS',
+                        "isInline": True
+                    },
+                    {
+                        "name": 'file.ppt',
+                        "size": 149150444123,
+                        "blobId": 'atPPT',
+                        "isDeleted": True,
+                        "isInline": False
+                    },
+                    {
+                        "name": 'invitation.ical',
+                        "size": 149150444123,
+                        "blobId": 'ical',
+                        "isInline": False
+                    },
+                    {
+                        "name": 'message.eml',
+                        "size": 104,
+                        "blobId": 'msg1',
+                        "isInline": False
+                    },
+                    {
+                        "name": 'Flower.jpg',
+                        "size": 1633,
+                        "blobId": 'attachment1',
+                        "width": 683,
+                        "height": 1024,
+                        "thumb": 'http://farm7.staticflickr.com/6146/5994894196_5b989248e2_t.jpg',
+                        "url": 'http://farm7.staticflickr.com/6146/5994894196_5b989248e2_b.jpg',
+                        "isInline": True
+                    },
+                    {
+                        "name": 'Train.jpg',
+                        "size": 1633,
+                        "blobId": 'attachment2',
+                        "width": 683,
+                        "height": 1024,
+                        "thumb": 'http://farm7.staticflickr.com/6005/5994325683_1441d5ba7d_t.jpg',
+                        "url": 'http://farm7.staticflickr.com/6005/5994325683_1441d5ba7d_b.jpg',
+                        "isInline": False
+                    },
+                    {
+                        "name": 'cat.jpg',
+                        "size": 1633,
+                        "blobId": 'attachment3',
+                        "width": 1024,
+                        "height": 1024,
+                        "thumb": 'http://farm7.staticflickr.com/6005/5994341117_ba1d3218c9_t.jpg',
+                        "url": 'http://farm7.staticflickr.com/6005/5994341117_ba1d3218c9_b.jpg',
+                        "isInline": True
+                    },
+                    {
+                        "name": 'sushi.jpg',
+                        "size": 1633,
+                        "blobId": 'attachment4',
+                        "width": 1024,
+                        "height": 683,
+                        "thumb": 'http://farm7.staticflickr.com/6132/5994905208_31c966fe70_t.jpg',
+                        "url": 'http://farm7.staticflickr.com/6132/5994905208_31c966fe70_b.jpg',
+                        "isInline": True
+                    }]
+                }
+            list.append(mail)
+        return {
+            "accountId": "13824",
+            "state": '123adf',
+            "list": list
+        }
