@@ -99,12 +99,18 @@ def make_marshmallow_field(attr_field):
 
         marshmallow_validate = marshmallow_impl
 
+    if is_many:
+        if field_type == marshmallow.fields.Nested:
+            field_args['many'] = True
+        else:
+            field_args['cls_or_instance'] = field_type
+            field_type = marshmallow.fields.List
+
     return field_type(
         data_key=to_camel_case(attr_field.name),
         required=required,
         allow_none=allow_none,
         validate=marshmallow_validate,
-        many=is_many,
         **field_args
     )
 

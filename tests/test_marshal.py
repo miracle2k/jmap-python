@@ -6,7 +6,7 @@ import attr
 import pytest
 from marshmallow import ValidationError
 from jmap.protocol.marshal import marshallable
-from typing import Optional
+from typing import Optional, List
 
 
 def test_optional():
@@ -89,6 +89,19 @@ def test_nested_objects():
     with pytest.raises(ValidationError):
         Bar.unmarshal({'foo': {'name': 2}})
     assert Bar.unmarshal({'foo': {'name': 'test'}}) == Bar(foo=Foo(name='test'))
+
+
+def test_list_of_primitive():
+    """
+    Test a list of a primitive.
+    """
+
+    @marshallable
+    @attr.s(auto_attribs=True)
+    class Foo:
+        names: List[str]
+
+    assert Foo.unmarshal({'names': ['a', 'b']}) == Foo(names=['a', 'b'])
 
 
 
