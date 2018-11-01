@@ -3,6 +3,9 @@
 # python-json-pointer - An implementation of the JSON Pointer syntax
 # https://github.com/stefankoegl/python-json-pointer
 #
+# Modified for jmap-python to:
+# - Handle the * array accessor required by the JMAP spec.
+#
 # Copyright (c) 2011 Stefan Kögl <stefan@skoegl.net>
 # All rights reserved.
 #
@@ -32,20 +35,8 @@
 
 """ Identify specific nodes in a JSON document (RFC 6901) """
 
-from __future__ import unicode_literals
 
-# Will be parsed by setup.py to determine package metadata
-__author__ = 'Stefan Kögl <stefan@skoegl.net>'
-__version__ = '2.0'
-__website__ = 'https://github.com/stefankoegl/python-json-pointer'
-__license__ = 'Modified BSD License'
-
-
-try:
-    from itertools import izip
-    str = unicode
-except ImportError:  # Python 3
-    izip = zip
+izip = zip
 
 try:
     from collections.abc import Mapping, Sequence
@@ -161,6 +152,12 @@ class EndOfList(object):
                                      lst=repr(self.list_))
 
 
+class FullList:
+
+    def __init__(self, list_):
+        self.list = list_
+
+
 class JsonPointer(object):
     """A JSON Pointer that can reference parts of a JSON document"""
 
@@ -198,10 +195,24 @@ class JsonPointer(object):
     def resolve(self, doc, default=_nothing):
         """Resolves the pointer against doc and returns the referenced object"""
 
-        for part in self.parts:
+        # Once we encounter a *, this happens
+        doc_is_list = False
 
+        for part in self.parts:
             try:
-                doc = self.walk(doc, part)
+                if doc_is_list:
+                    new_doc_list = []
+                    for item in doc:
+                        new_doc_list.append(self.walk(item, part))
+                    doc = new_doc_list
+                    # TODO: Any FullList in the result, flatten
+
+                else:
+                    doc = self.walk(doc, part)
+                    if isinstance(doc, FullList):
+                        doc_is_list = True
+                        doc = doc.list
+
             except JsonPointerException:
                 if default is _nothing:
                     raise
@@ -236,7 +247,7 @@ class JsonPointer(object):
 
         elif isinstance(doc, Sequence):
 
-            if part == '-':
+            if part == '-' or part == '*':
                 return part
 
             if not self._RE_ARRAY_INDEX.match(str(part)):
@@ -264,6 +275,9 @@ class JsonPointer(object):
         if isinstance(doc, Sequence):
             if part == '-':
                 return EndOfList(doc)
+
+            if part == '*':
+                return FullList(doc)
 
             try:
                 return doc[part]
