@@ -1,9 +1,38 @@
 import inspect
 from typing import Any, Dict
 
+from marshmallow import ValidationError
+
 
 class JMapError(Exception):
     pass
+
+
+class JMapMethodError(Exception):
+    """
+    A method level error  (3.5.2 Method-level errors, https://jmap.io/spec-core.html#errors).
+    """
+
+    typename = None
+
+    def __init__(self, description):
+        super().__init__(description)
+        self.description = description
+
+    def to_json(self):
+        result = {
+            'type': self.typename
+        }
+        if self.description:
+            result['description'] = self.description
+        return result
+
+
+class JMapInvalidArguments(JMapMethodError):
+    typename = 'invalidArguments'
+
+    def __init__(self, description):
+        super().__init__(description)
 
 
 class JmapModuleInterface:
@@ -66,7 +95,10 @@ class JmapBaseModule(JmapModuleInterface):
         if type is Any:
             arg_object = input
         else:
-            arg_object = type.unmarshal(input)
+            try:
+                arg_object = type.unmarshal(input)
+            except ValidationError as exc:
+                raise JMapInvalidArguments(str(exc))
 
         return self.methods[method_name](context, arg_object)
 

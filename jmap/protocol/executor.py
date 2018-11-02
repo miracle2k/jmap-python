@@ -3,7 +3,7 @@ Knows how to execute a JMAP request.
 """
 from collections import defaultdict
 from typing import List, Dict, Any
-from jmap.protocol.core import JmapModuleInterface, JMapError
+from jmap.protocol.core import JmapModuleInterface, JMapError, JMapMethodError
 from jmap.protocol.jsonpointer import resolve_pointer
 from jmap.protocol.models import JMapRequest, JMapResponse, ResultReference
 
@@ -66,15 +66,24 @@ class Executor:
                     del args[arg_name]
 
             # Execute the call
-            result = module.execute(method_call.name, args)
+            response_name = response_data = None
+            try:
+                result = module.execute(method_call.name, args)
+            except JMapMethodError as exc:
+                response_name = 'error'
+                response_data = exc.to_json()
+            else:
+                response_name = method_call.name
+                response_data = result
+
 
             # Index it
-            responses_by_client_id[method_call.client_id][method_call.name] = result
+            responses_by_client_id[method_call.client_id][response_name] = response_data
 
             method_responses.append(
                 [
-                    method_call.name,
-                    result,
+                    response_name,
+                    response_data,
                     method_call.client_id
                 ]
             )
