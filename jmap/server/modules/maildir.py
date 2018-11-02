@@ -3,7 +3,7 @@ import mailbox
 
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, Mailbox, EmailQueryArgs, EmailQueryResponse, \
-    EmailGetArgs, EmailGetResponse, ThreadGetArgs, ThreadGetResponse
+    EmailGetArgs, EmailGetResponse, ThreadGetArgs, ThreadGetResponse, Thread
 
 
 class MailboxEmailModule(EmailModule):
@@ -109,10 +109,21 @@ class MboxModule(EmailModule):
         )
 
     def handle_thread_get(self, context, args: ThreadGetArgs) -> ThreadGetResponse:
+        if not args.ids:
+            matching = self.mbox.items()
+        else:
+            matching = filter(lambda x: str(x[0]) in args.ids, self.mbox.items())
+
         return ThreadGetResponse(
             account_id=args.account_id,
             state=self.get_state_for(Mailbox),
-            list=[],
+            list=[
+                Thread(
+                    id=id,
+                    email_ids=[id]
+                )
+                for id, m in matching
+            ],
             not_found=[]
         )
 

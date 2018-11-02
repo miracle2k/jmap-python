@@ -148,7 +148,11 @@ class Email:
 
 @model
 class Thread:
-    pass
+    """
+    3. Threads (https://jmap.io/spec-mail.html#threads)
+    """
+    id: str
+    email_ids: List [str]
 
 
 @model
