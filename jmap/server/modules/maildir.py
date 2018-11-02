@@ -14,6 +14,40 @@ class MailboxEmailModule(EmailModule):
 
 class MboxModule(EmailModule):
     """This serves JMAP email from a particular mbox file.
+
+    - mbox is just a bunch of emails one after another. To even read the mails,
+      you have to load the whole file into memory. To store data such as "read
+      flags", you have to add X-headers to the emails in the file. This requires
+      rewriting all subsequent emails, unless you use tricks such as pre-kept space,
+      like dovecot does. To store information such as "next free message id", dovecot
+      insert special X-headers into the very first message of the mbox. Stuff like
+      that. Those are essentially app-specific extensions.
+
+    - So our implementation is either going to parse emails for every request, using
+      no indices, working directly with the list of mails in memory, do don't touch
+      the mailbox file, generate message ids on every request based on the mail content,
+      and be super slow.
+
+    - Does that, but speed things up using an in-memory index that is rebuild on opening
+      the file (doesn't hurt).
+
+    - Have our own index format on disk, and store our own state (such as msg ids)
+      inside custom headers (or outside). May or may not work together with other
+      tools accessing the mailbox.
+
+    - Match an existing implementation such as dovecot and read and work with their
+      index files.
+
+    The python mbox module doesn't actually help us a lot here, because it always reads
+    the whole file into memory. Certain performance gains that indices might give us
+    would require a custom implementation.
+
+    It really depends on what we want. Do we want to work along side an existing email
+    server, adding JMAP capability on top? Do we want to be our own server?
+
+    Related links:
+
+    - https://wiki.dovecot.org/Design/Indexes/MailIndexApi
     """
 
     def __init__(self, mbox_file, **kwargs):
