@@ -72,7 +72,7 @@ def make_marshmallow_field(attr_field):
 
     # Is this another marshallable data class?
     if hasattr(type, '__marshmallow_schema__'):
-        field_type = marshmallow.fields.Nested
+        field_type = CustomNested
         field_args = {'nested': type.__marshmallow_schema__}
     else:
         if not type in TYPE_MAPPING:
@@ -100,7 +100,7 @@ def make_marshmallow_field(attr_field):
         marshmallow_validate = marshmallow_impl
 
     if is_many:
-        if field_type == marshmallow.fields.Nested:
+        if issubclass(field_type, marshmallow.fields.Nested):
             field_args['many'] = True
         else:
             field_args['cls_or_instance'] = field_type
@@ -167,3 +167,23 @@ def to_camel_case(snake_str):
     # We capitalize the first letter of each component except the first one
     # with the 'title' method and join them together.
     return components[0] + ''.join(x.title() for x in components[1:])
+
+
+class CustomNested(fields.Nested):
+    """
+    Like marshmallow's Nested, but when serializing, when given a dict
+    (rather than a model), just outputs the dict as given.
+    """
+
+    def _serialize(self, nested_obj, attr, obj, **kwargs):
+        dump_dict = False
+        if self.many and nested_obj and len(nested_obj) and isinstance(nested_obj[0], dict):
+            dump_dict = True
+        elif not self.many and isinstance(nested_obj, dict):
+            dump_dict = True
+        if dump_dict:
+            return nested_obj
+
+        # Serialize as normal
+        return super()._serialize(nested_obj, attr, obj, **kwargs)
+
