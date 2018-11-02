@@ -200,12 +200,16 @@ class JsonPointer(object):
 
         for part in self.parts:
             try:
+                # If there was already a * index, we now need to process all
+                # subsequent parts for every item in the wildcard array.
                 if doc_is_list:
                     new_doc_list = []
                     for item in doc:
                         new_doc_list.append(self.walk(item, part))
-                    doc = new_doc_list
+
                     # TODO: Any FullList in the result, flatten
+
+                    doc = new_doc_list
 
                 else:
                     doc = self.walk(doc, part)
@@ -218,6 +222,10 @@ class JsonPointer(object):
                     raise
                 else:
                     return default
+
+        if doc_is_list:
+            # According to the JMAP spec, if the last thing we pointed at was an array, flatten it
+            doc = [subitem for item in doc for subitem in (item if isinstance(item, list) else [item])]
 
         return doc
 
