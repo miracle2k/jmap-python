@@ -1,5 +1,6 @@
 import pytest
-from marshmallow import ValidationError
+
+from jmap.protocol.core import JMapInvalidArguments
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs
 from jmap.server.accounts import StaticBackend
@@ -12,7 +13,7 @@ def test_email():
             assert args.account_id == 'test'
             return {}
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(JMapInvalidArguments):
         Module().execute('Mailbox/get', {})
 
     Module(auth_backend=StaticBackend(accounts={})).execute('Mailbox/get', {'accountId': 'test'})
