@@ -6,7 +6,7 @@ import attr
 import pytest
 from marshmallow import ValidationError
 from jmap.protocol.marshal import marshallable
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
 def test_optional():
@@ -104,4 +104,14 @@ def test_list_of_primitive():
     assert Foo.unmarshal({'names': ['a', 'b']}) == Foo(names=['a', 'b'])
 
 
+def test_dict_of_primitive():
+    """
+    Test a dict of a primitive.
+    """
 
+    @marshallable
+    @attr.s(auto_attribs=True)
+    class Foo:
+        names: Dict[str, bool]
+
+    assert Foo.unmarshal({'names': {'a': True, 'b': False}}) == Foo(names={'a': True, 'b': False})

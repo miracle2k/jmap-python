@@ -23,35 +23,49 @@ TYPE_MAPPING = {
     str: fields.String,
     float: fields.Float,
     bool: fields.Boolean,
-    int: fields.Integer,
-    dict: fields.Raw
+    int: fields.Integer
 }
 
 
-def make_marshmallow_field(attr_field):
-    """For the given `attr` field, create a `marshmallow` field.
+def get_marshmallow_field_class_from_python_type(klass):
+    # It is already a marshmallow type?
+    if isinstance(klass, fields.Field):
+        return klass, {}
 
-    We convert the field type, attr validators, if the field is required, or allows None.
-    """
-    type = attr_field.type
+    # Is this another marshallable data class?
+    if hasattr(klass, '__marshmallow_schema__'):
+        mm_type = CustomNested
+        args = {'nested': klass.__marshmallow_schema__}
+    else:
+        if not klass in TYPE_MAPPING:
+            raise ValueError('%s is not a valid type' % klass)
+        mm_type = TYPE_MAPPING[klass]
+        args = {}
 
-    allow_none = False
-    required = True
+    return mm_type, args
+
+
+def make_marshmallow_field_from_class(klass):
+    mm_type, args = get_marshmallow_field_class_from_python_type(klass)
+    return mm_type(**args)
+
+
+def get_marshmallow_field_class_from_mypy_annotation(mypy_type):
     is_many = False
 
     # Resolve MyPy types. Have a look at how this is done in pydantic.fields.py:_populate_sub_fields
     # Indicates a MyPy type; those hide their real type because
     # they do not want `isinstance(foo, Union)` to be abused.
     #
-    # The while loop means we do not differ between Optional[List[str]] and List[Optioanl[str]] (TODO).
-    while hasattr(type, '__origin__'):
-        mypy_type = type.__origin__
+    # The while loop means we do not differ between Optional[List[str]] and List[Optional[str]] (TODO).
+    while hasattr(mypy_type, '__origin__'):
+        real_mypy_type = mypy_type.__origin__
 
-        if mypy_type is Union:
+        if real_mypy_type is Union:
             # We do not want to support Unions itself; we only allow Optional[foo],
             # which in MyPy internally is Union[foo, None].
             union_types = []
-            for type_ in type.__args__:
+            for type_ in mypy_type.__args__:
                 if type_ is NoneType:
                     allow_none = True
                 else:
@@ -60,25 +74,44 @@ def make_marshmallow_field(attr_field):
             if len(union_types) > 1:
                 raise ValueError('Union[] with multiple values not supported by marshalling system.')
 
-            type = union_types[0]
+            mypy_type = union_types[0]
 
-        elif isclass(mypy_type) and issubclass(mypy_type, List):
-            type = type.__args__[0]
+        elif isclass(real_mypy_type) and issubclass(real_mypy_type, List):
+            mypy_type = mypy_type.__args__[0]
             is_many = True
+
+        elif isclass(real_mypy_type) and issubclass(real_mypy_type, Dict):
+            key_type, value_type = mypy_type.__args__
+            key_field = make_marshmallow_field_from_class(key_type)
+            value_field = make_marshmallow_field_from_class(value_type)
+
+            field_type = fields.Dict
+            field_args = {
+                'keys': key_field,
+                'values': value_field,
+            }
+
+            return field_type, field_args, False
 
         else:
             # Could not resolve
             break
 
     # Is this another marshallable data class?
-    if hasattr(type, '__marshmallow_schema__'):
-        field_type = CustomNested
-        field_args = {'nested': type.__marshmallow_schema__}
-    else:
-        if not type in TYPE_MAPPING:
-            raise ValueError('%s is not a valid type' % type)
-        field_type = TYPE_MAPPING[type]
-        field_args = {}
+    field_type, field_args = get_marshmallow_field_class_from_python_type(mypy_type)
+    return field_type, field_args, is_many
+
+
+def make_marshmallow_field(attr_field):
+    """For the given `attr` field, create a `marshmallow` field.
+
+    We convert the field type, attr validators, if the field is required, or allows None.
+    """
+    allow_none = False
+    required = True
+
+    field_type, field_args, is_many = \
+        get_marshmallow_field_class_from_mypy_annotation(attr_field.type)
 
     # Only do not require it if it has a default.
     if not attr_field.default is attr.NOTHING:
