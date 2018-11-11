@@ -11,7 +11,7 @@ See the docstring of `models` to read more about these choices.
 
 from datetime import datetime
 from inspect import isclass
-from typing import Union, Dict, List
+from typing import Union, Dict, List, _ForwardRef, Tuple, Any
 import marshmallow
 import attr
 from marshmallow import ValidationError, post_load, fields
@@ -47,26 +47,29 @@ def get_marshmallow_field_class_from_python_type(klass):
     return mm_type, args
 
 
-def make_marshmallow_field_from_class(klass):
+def make_marshmallow_field_from_python_type(klass):
     mm_type, args = get_marshmallow_field_class_from_python_type(klass)
     return mm_type(**args)
 
 
-def get_marshmallow_field_class_from_mypy_annotation(mypy_type):
-    is_many = False
+def get_marshmallow_field_class_from_mypy_annotation(mypy_type) -> Tuple[Any, Dict]:
+    # If a forward reference is given, use the forward reference system of
+    # marshmallow. Return a fields.Nested field class with the target type
+    # given as a string.
+    if isinstance(mypy_type, _ForwardRef):
+        return CustomNested, {'nested': mypy_type.__forward_arg__}
 
     # Resolve MyPy types. Have a look at how this is done in pydantic.fields.py:_populate_sub_fields
     # Indicates a MyPy type; those hide their real type because
     # they do not want `isinstance(foo, Union)` to be abused.
-    #
-    # The while loop means we do not differ between Optional[List[str]] and List[Optional[str]] (TODO).
-    while hasattr(mypy_type, '__origin__'):
+    if hasattr(mypy_type, '__origin__'):
         real_mypy_type = mypy_type.__origin__
 
         if real_mypy_type is Union:
             # We do not want to support Unions itself; we only allow Optional[foo],
             # which in MyPy internally is Union[foo, None].
             union_types = []
+            allow_none = False
             for type_ in mypy_type.__args__:
                 if type_ is NoneType:
                     allow_none = True
@@ -76,16 +79,25 @@ def get_marshmallow_field_class_from_mypy_annotation(mypy_type):
             if len(union_types) > 1:
                 raise ValueError('Union[] with multiple values not supported by marshalling system.')
 
-            mypy_type = union_types[0]
+            field_type, field_args = \
+                get_marshmallow_field_class_from_mypy_annotation(union_types[0])
+            return field_type, {**field_args, 'allow_none': allow_none}
 
         elif isclass(real_mypy_type) and issubclass(real_mypy_type, List):
-            mypy_type = mypy_type.__args__[0]
-            is_many = True
+            item_type = mypy_type.__args__[0]
+            item_field_class, item_field_args =\
+                get_marshmallow_field_class_from_mypy_annotation(item_type)
+
+            if issubclass(item_field_class, marshmallow.fields.Nested):
+                return item_field_class, {'many': True, **item_field_args}
+            else:
+                field_instance = item_field_class(**item_field_args)
+                return marshmallow.fields.List, {'cls_or_instance': field_instance}
 
         elif isclass(real_mypy_type) and issubclass(real_mypy_type, Dict):
             key_type, value_type = mypy_type.__args__
-            key_field = make_marshmallow_field_from_class(key_type)
-            value_field = make_marshmallow_field_from_class(value_type)
+            key_field = make_marshmallow_field_from_python_type(key_type)
+            value_field = make_marshmallow_field_from_python_type(value_type)
 
             field_type = fields.Dict
             field_args = {
@@ -93,15 +105,11 @@ def get_marshmallow_field_class_from_mypy_annotation(mypy_type):
                 'values': value_field,
             }
 
-            return field_type, field_args, False
-
-        else:
-            # Could not resolve
-            break
+            return field_type, field_args
 
     # Is this another marshallable data class?
     field_type, field_args = get_marshmallow_field_class_from_python_type(mypy_type)
-    return field_type, field_args, is_many
+    return field_type, field_args
 
 
 def make_marshmallow_field(attr_field):
@@ -109,10 +117,9 @@ def make_marshmallow_field(attr_field):
 
     We convert the field type, attr validators, if the field is required, or allows None.
     """
-    allow_none = False
     required = True
 
-    field_type, field_args, is_many = \
+    field_type, field_args = \
         get_marshmallow_field_class_from_mypy_annotation(attr_field.type)
 
     # Only do not require it if it has a default.
@@ -134,17 +141,9 @@ def make_marshmallow_field(attr_field):
 
         marshmallow_validate = marshmallow_impl
 
-    if is_many:
-        if issubclass(field_type, marshmallow.fields.Nested):
-            field_args['many'] = True
-        else:
-            field_args['cls_or_instance'] = field_type
-            field_type = marshmallow.fields.List
-
     return field_type(
         data_key=to_camel_case(attr_field.name),
         required=required,
-        allow_none=allow_none,
         validate=marshmallow_validate,
         **field_args
     )

@@ -104,6 +104,30 @@ def test_list_of_primitive():
     assert Foo.unmarshal({'names': ['a', 'b']}) == Foo(names=['a', 'b'])
 
 
+def test_list_of_optional():
+    """
+    Test List[Optional[*] vs Optional[List[*]]
+    """
+
+    @marshallable
+    @attr.s(auto_attribs=True)
+    class OptionalItem:
+        names: List[Optional[str]]
+
+    assert OptionalItem.unmarshal({'names': ['a', None]}) == OptionalItem(names=['a', None])
+    with pytest.raises(ValidationError):
+        assert OptionalItem.unmarshal({'names': None}) == OptionalItem(names=None)
+
+    @marshallable
+    @attr.s(auto_attribs=True)
+    class OptionalList:
+        names: Optional[List[str]]
+
+    with pytest.raises(ValidationError):
+        assert OptionalList.unmarshal({'names': ['a', None]}) == OptionalList(names=['a', None])
+    assert OptionalList.unmarshal({'names': None}) == OptionalList(names=None)
+
+
 def test_dict_of_primitive():
     """
     Test a dict of a primitive.
@@ -115,3 +139,17 @@ def test_dict_of_primitive():
         names: Dict[str, bool]
 
     assert Foo.unmarshal({'names': {'a': True, 'b': False}}) == Foo(names={'a': True, 'b': False})
+
+
+def test_forward_refs():
+    """
+    Test forward references.
+    """
+
+    @marshallable
+    @attr.s(auto_attribs=True)
+    class Foo:
+        id: int
+        sub: Optional["self"]
+
+    assert Foo.unmarshal({'id': 1, 'sub': {'id': 2, 'sub': None}}) == Foo(id=1, sub=Foo(id=2, sub=None))
