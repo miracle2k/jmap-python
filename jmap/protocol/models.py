@@ -227,6 +227,26 @@ class MailboxGetResponse(StandardGetResponse):
 
 
 @model
+class MailboxQueryFilterCondition:
+    """2.3 Filter Conditions (https://jmap.io/spec-mail.html#mailbox/query)."""
+    parent_id = Optional[str] = None
+    name = Optional[str] = None
+    role = Optional[str] = None
+    has_any_role = Optional[bool] = None
+    is_subscribed = Optional[bool] = None
+
+
+@model
+class MailboxQueryArgs(StandardQueryArgs):
+    pass
+
+
+@model
+class MailboxQueryResponse(StandardQueryResponse):
+    pass
+
+
+@model
 class EmailGetArgs(StandardGetArgs):
     pass
 
@@ -234,6 +254,25 @@ class EmailGetArgs(StandardGetArgs):
 @model
 class EmailGetResponse(StandardGetResponse):
     list: List[Email]
+
+
+@model
+class EmailQueryFilterCondition:
+    """4.4.1 Filtering (https://jmap.io/spec-mail.html#mailbox/query)."""
+    in_mailbox = Optional[str] = None
+    in_mailbox_other_than = Optional[List[str]] = None
+    # a lot more
+
+
+@model
+class EmailQueryArgs(StandardQueryArgs):
+    pass
+
+
+@model
+class EmailGetResponse(StandardGetResponse):
+    list: List[Email]
+
 
 
 @model
