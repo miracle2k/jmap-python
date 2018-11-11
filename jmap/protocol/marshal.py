@@ -9,6 +9,7 @@ type annotations.
 See the docstring of `models` to read more about these choices.
 """
 
+from datetime import datetime
 from inspect import isclass
 from typing import Union, Dict, List
 import marshmallow
@@ -23,7 +24,8 @@ TYPE_MAPPING = {
     str: fields.String,
     float: fields.Float,
     bool: fields.Boolean,
-    int: fields.Integer
+    int: fields.Integer,
+    datetime: fields.DateTime
 }
 
 
