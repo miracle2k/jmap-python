@@ -173,13 +173,15 @@ def test_enum():
     class Foo:
         v: Color
 
+    assert Foo.marshal(Foo(v=Color.red)) == {'v': 'red'}
+
     with pytest.raises(ValidationError):
         assert Foo.unmarshal({'v': 1}) == Foo(v=1)
 
     with pytest.raises(ValidationError):
         assert Foo.unmarshal({'v': 'redd'}) == Foo(v='redd')
 
-    assert Foo.unmarshal({'v': 'red'}) == Foo(v='red')
+    assert Foo.unmarshal({'v': 'red'}) == Foo(v=Color.red)
 
 
 def test_custom_marshal_functions():

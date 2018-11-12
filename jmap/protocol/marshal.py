@@ -47,10 +47,8 @@ def get_marshmallow_field_class_from_python_type(klass):
 
     # Is it an enum
     elif issubclass(klass, enum.Enum):
-        mm_type = fields.String
-        args = {
-            'validate': validate.OneOf([c.value for c in klass])
-        }
+        mm_type = EnumField
+        args = {'enum': klass, 'by_value': True}
 
     # Otherwise, see if this type as a direct mapping to a marshmallow field
     else:
@@ -304,3 +302,66 @@ class CustomUnmarshalField(fields.Field):
         return new_data
 
 
+class EnumField(fields.Field):
+    """
+    Adapted from: https://github.com/justanr/marshmallow_enum/blob/master/marshmallow_enum/__init__.py
+    """
+
+    default_error_messages = {
+        'by_name': 'Invalid enum member {input}',
+        'by_value': 'Invalid enum value {input}',
+        'must_be_string': 'Enum name must be string'
+    }
+
+    def __init__(self, enum, by_value=False, error='', *args, **kwargs):
+        self.enum = enum
+        self.by_value = by_value
+
+        self.error = error
+
+        super(EnumField, self).__init__(*args, **kwargs)
+
+    def _serialize(self, value, attr, obj):
+        if value is None:
+            return None
+        elif self.by_value:
+            return value.value
+        else:
+            return value.name
+
+    def _deserialize(self, value, attr, data):
+        if value is None:
+            return None
+        elif self.by_value:
+            return self._deserialize_by_value(value, attr, data)
+        else:
+            return self._deserialize_by_name(value, attr, data)
+
+    def _deserialize_by_value(self, value, attr, data):
+        try:
+            return self.enum(value)
+        except ValueError:
+            self.fail('by_value', input=value, value=value)
+
+    def _deserialize_by_name(self, value, attr, data):
+        if not isinstance(value, (str)):
+            self.fail('must_be_string', input=value, name=value)
+
+        try:
+            return getattr(self.enum, value)
+        except AttributeError:
+            self.fail('by_name', input=value, name=value)
+
+    def fail(self, key, **kwargs):
+        kwargs['values'] = ', '.join([str(mem.value) for mem in self.enum])
+        kwargs['names'] = ', '.join([mem.name for mem in self.enum])
+
+        if self.error:
+            if self.by_value:
+                kwargs['choices'] = kwargs['values']
+            else:
+                kwargs['choices'] = kwargs['names']
+            msg = self.error.format(**kwargs)
+            raise ValidationError(msg)
+        else:
+            super(EnumField, self).fail(key, **kwargs)
