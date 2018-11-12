@@ -5,9 +5,9 @@ import enum
 
 import attr
 import pytest
-from marshmallow import ValidationError
-from jmap.protocol.marshal import marshallable, custom_marshal
-from typing import Optional, List, Dict
+from marshmallow import ValidationError, fields
+from jmap.protocol.marshal import marshallable, custom_marshal, PolyField
+from typing import Optional, List, Dict, Union
 
 from jmap.protocol.models import model
 
@@ -209,3 +209,76 @@ def test_custom_marshal_functions():
     assert Foo.marshal(Foo(v=1)) == {1: 'v'}
 
     assert Foo.unmarshal({'x': 'red', 'y': 'blue'}) == Foo(v=7)
+
+
+def test_union_with_multiple_types():
+    """
+    Test a union with more than one type
+    """
+
+    @model
+    class A:
+        a: str
+
+    @marshallable
+    @attr.s(auto_attribs=True)
+    class Foo:
+        names: List[Union[str, A]]
+
+    assert Foo.unmarshal({'names': ['a', {'a': '3'}]}) == Foo(names=['a', A(a='3')])
+
+
+class TestPolyfield:
+
+    def test_with_primitives(self):
+        """
+        Test the PolyField with primitives
+        """
+
+        f = PolyField({
+            str: fields.String(),
+            int: fields.Integer()
+        })
+
+        assert f.serialize('num', {'num': 10}) == 10
+        assert f.serialize('num', {'num': 'test'}) == 'test'
+        with pytest.raises(ValidationError):
+            assert f.serialize('num', {'num': {}}) == True
+
+        assert f.deserialize(10) == 10
+        assert f.deserialize('test') == 'test'
+        with pytest.raises(ValidationError):
+            assert f.deserialize({}) == {}
+
+    def test_with_schemas(self):
+        """
+        Test the PolyField with primitives
+        """
+
+        @model
+        class A:
+            shared: str
+            a: str
+
+        @model
+        class B:
+            shared: int
+            b: str
+
+        f = PolyField({
+            A: None,
+            B: None
+        })
+
+        assert f.serialize('x', {'x': A(shared='s', a='a')}) == {'shared': 's', 'a': 'a'}
+        assert f.serialize('x', {'x': B(shared=3, b='b')}) == {'shared': 3, 'b': 'b'}
+        with pytest.raises(ValidationError):
+            assert f.serialize('x', {'x': {'x': 1}}) == {'shared': 's', 'b': 'b'}
+
+        assert f.deserialize({'shared': 's', 'a': 'a'}) == A(shared='s', a='a')
+        assert f.deserialize({'shared': 3, 'b': 'b'}) == B(shared=3, b='b')
+        with pytest.raises(ValidationError):
+            assert f.deserialize({'shared': 1}) == {}
+
+        with pytest.raises(ValidationError):
+            assert f.deserialize(1) == {}

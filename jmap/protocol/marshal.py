@@ -9,6 +9,8 @@ type annotations.
 See the docstring of `models` to read more about these choices.
 """
 import enum
+import re
+from collections import Counter
 from datetime import datetime
 from inspect import isclass
 from typing import Union, Dict, List, _ForwardRef, Tuple, Any, Optional
@@ -90,11 +92,20 @@ def get_marshmallow_field_class_from_mypy_annotation(mypy_type) -> Tuple[Any, Di
                     union_types.append(type_)
 
             if len(union_types) > 1:
-                raise ValueError('Union[] with multiple values not supported by marshalling system.')
+                field_type = PolyField
+                field_args = {
+                    'union_types': {
+                        t: make_marshmallow_field_from_python_type(t)
+                        for t in union_types
+                    },
+                    'allow_none': allow_none
+                }
+                return field_type, field_args
 
-            field_type, field_args = \
-                get_marshmallow_field_class_from_mypy_annotation(union_types[0])
-            return field_type, {**field_args, 'allow_none': allow_none}
+            else:
+                field_type, field_args = \
+                    get_marshmallow_field_class_from_mypy_annotation(union_types[0])
+                return field_type, {**field_args, 'allow_none': allow_none}
 
         elif isclass(real_mypy_type) and issubclass(real_mypy_type, List):
             item_type = mypy_type.__args__[0]
@@ -168,8 +179,13 @@ def make_marshmallow_field(attr_field) -> Optional[fields.Field]:
         assert not 'validate'in field_args
         field_args['validate'] = marshmallow_impl
 
+    # Determine the key in JSON for this field.
+    data_key = to_camel_case(attr_field.name)
+    if data_key.endswith('_'):  # To support "from_"
+        data_key = data_key[:-1]
+
     return field_type(
-        data_key=to_camel_case(attr_field.name),
+        data_key=data_key,
         required=required,
         **field_args
     )
@@ -236,6 +252,13 @@ def to_camel_case(snake_str):
     # We capitalize the first letter of each component except the first one
     # with the 'title' method and join them together.
     return components[0] + ''.join(x.title() for x in components[1:])
+
+
+def snakecase(string):
+    string = re.sub(r"[\-\.\s]", '_', str(string))
+    if not string:
+        return string
+    return string[0].lower() + re.sub(r"[A-Z]", lambda matched: '_' + matched.group(0).lower(), string[1:])
 
 
 class CustomNested(fields.Nested):
@@ -365,3 +388,98 @@ class EnumField(fields.Field):
             raise ValidationError(msg)
         else:
             super(EnumField, self).fail(key, **kwargs)
+
+
+class PolyField(fields.Field):
+    """
+    Adapted from https://github.com/Bachmann1234/marshmallow-polyfield/blob/master/marshmallow_polyfield/polyfield.py
+
+    However, ours should be smart enough to not need a manual decider.
+    """
+
+    def __init__(
+        self,
+        union_types: Dict[Any, Any],
+        many=False,
+        **metadata
+    ):
+        super(PolyField, self).__init__(**metadata)
+        self.many = many
+        self.union_types = union_types
+
+    def _serialize(self, value, attr, obj, **kwargs):
+        if not self.many:
+            value = [value]
+
+        results = []
+        for v in value:
+            # Figure out which type it is
+            for pytype, field_class in self.union_types.items():
+                if isinstance(v, pytype):
+                    if hasattr(pytype, '__marshmallow_schema__'):
+                        # Indicates that we expect pytype to be a model
+                        schema_class = pytype.__marshmallow_schema__
+                        schema = schema_class()
+                        schema.context.update(getattr(self, 'context', {}))
+                        data = schema.dump(v)
+                        results.append(data)
+
+                    else:
+                        results.append(field_class._serialize(v, attr, obj))
+                    break
+            else:
+                raise ValidationError(f'Not a valid value for "{attr}": {v}')
+
+        if self.many:
+            return results
+        else:
+            return results[0]
+
+    def _deserialize(self, value, attr, data, **kwargs):
+        if not self.many:
+            value = [value]
+
+        results = []
+        for v in value:
+            found = False
+
+            # Figure out which type it is
+            for pytype, field in self.union_types.items():
+                # This only works with primitives
+                if isinstance(v, pytype):
+                    results.append(field._deserialize(v, attr, data))
+                    found = True
+                    break
+
+            else:
+                if isinstance(v, dict):
+                    # See if we can recognize it by the keys
+                    # Get all the schemas involved
+                    schemas = [k.__marshmallow_schema__ for k in self.union_types.keys()
+                        if hasattr(k, '__marshmallow_schema__')]
+
+                    # Figure out those keys which are unique across all schemas
+                    keys_for_schema = [set(s._declared_fields.keys()) for s in schemas]
+                    counts = Counter([key for keys in keys_for_schema for key in keys])
+                    unique_keys = set([k for k, v in counts.items() if v == 1])
+
+                    # Test each schema
+                    for schema_class, keys in zip(schemas, keys_for_schema):
+                        for key in keys:
+                            if key in unique_keys and key in v:
+                                schema = schema_class()
+                                schema.context.update(getattr(self, 'context', {}))
+                                data = schema.load(v)
+                                results.append(data)
+                                found = True
+                                break
+                        if found:
+                            break
+
+            if not found:
+                raise ValidationError(f'Not one of the possible valid types for "{attr}": {v}')
+
+        if self.many:
+            return results
+        else:
+            return results[0]
