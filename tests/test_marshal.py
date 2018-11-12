@@ -6,8 +6,10 @@ import enum
 import attr
 import pytest
 from marshmallow import ValidationError
-from jmap.protocol.marshal import marshallable
+from jmap.protocol.marshal import marshallable, custom_marshal
 from typing import Optional, List, Dict
+
+from jmap.protocol.models import model
 
 
 def test_optional():
@@ -178,3 +180,30 @@ def test_enum():
         assert Foo.unmarshal({'v': 'redd'}) == Foo(v='redd')
 
     assert Foo.unmarshal({'v': 'red'}) == Foo(v='red')
+
+
+def test_custom_marshal_functions():
+    """
+    Test custom marshal/unmarshal functions for a field.
+    """
+
+    def dump(data, instance, field):
+        # Instead of {v: 1}, output {1: v}
+        data[getattr(instance, field.name)] = field.name
+        return data
+
+    def load(data, field):
+        # Consume all other keys, sum length of all
+        sum = 0
+        for k, v in data.items():
+            sum += len(v)
+
+        return sum, list(data.keys())
+
+    @model
+    class Foo:
+        v: int = attr.ib(metadata={'marshal': custom_marshal(dump, load)})
+
+    assert Foo.marshal(Foo(v=1)) == {1: 'v'}
+
+    assert Foo.unmarshal({'x': 'red', 'y': 'blue'}) == Foo(v=7)

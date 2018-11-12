@@ -11,10 +11,11 @@ See the docstring of `models` to read more about these choices.
 import enum
 from datetime import datetime
 from inspect import isclass
-from typing import Union, Dict, List, _ForwardRef, Tuple, Any
+from typing import Union, Dict, List, _ForwardRef, Tuple, Any, Optional
 import marshmallow
 import attr
-from marshmallow import ValidationError, post_load, fields, validate
+from marshmallow import ValidationError, post_load, fields, validate, post_dump
+
 
 NoneType = type(None)
 
@@ -26,6 +27,12 @@ TYPE_MAPPING = {
     int: fields.Integer,
     datetime: fields.DateTime
 }
+
+
+@attr.attrs
+class custom_marshal:
+    marshal = attr.ib()
+    unmarshal = attr.ib()
 
 
 def get_marshmallow_field_class_from_python_type(klass):
@@ -120,15 +127,29 @@ def get_marshmallow_field_class_from_mypy_annotation(mypy_type) -> Tuple[Any, Di
     return field_type, field_args
 
 
-def make_marshmallow_field(attr_field):
+def make_marshmallow_field(attr_field) -> Optional[fields.Field]:
     """For the given `attr` field, create a `marshmallow` field.
 
     We convert the field type, attr validators, if the field is required, or allows None.
     """
+
     required = True
 
-    field_type, field_args = \
-        get_marshmallow_field_class_from_mypy_annotation(attr_field.type)
+    custom_marshal = attr_field.metadata.get('marshal')
+
+    # Handle the case of the field wanting to do custom marshalling
+    if custom_marshal:
+        field_type = CustomUnmarshalField
+        field_args = {
+            'attr_field': attr_field,
+            'unmarshal_func': custom_marshal.unmarshal,
+            # We only load it, because dumping is done in a post_dump hook.
+            'load_only': True
+        }
+
+    else:
+        field_type, field_args = \
+            get_marshmallow_field_class_from_mypy_annotation(attr_field.type)
 
     # Only do not require it if it has a default.
     if not attr_field.default is attr.NOTHING:
@@ -148,7 +169,6 @@ def make_marshmallow_field(attr_field):
 
         assert not 'validate'in field_args
         field_args['validate'] = marshmallow_impl
-
 
     return field_type(
         data_key=to_camel_case(attr_field.name),
@@ -195,7 +215,16 @@ def marshallable(attrclass):
         # libraries built on top.
         return attrclass(**data)
 
+    def process_dumped_result(self, data, original):
+        # Fields have the ability to provide a hook to customize how they are serialized.
+        for field in attr.fields(attrclass):
+            marshal_helper = field.metadata.get('marshal', None)
+            if marshal_helper:
+                data = marshal_helper.marshal(data, original, field)
+        return data
+
     marshmallow_fields['_internal_make_object'] = post_load(make_object)
+    marshmallow_fields['_internal_post_dump_object'] = post_dump(process_dumped_result, pass_original=True)
 
     marshmallow_schema = type(f'{attrclass}Schema', (marshmallow.Schema,), marshmallow_fields)
     attrclass.__marshmallow_schema__ = marshmallow_schema
@@ -215,6 +244,9 @@ class CustomNested(fields.Nested):
     """
     Like marshmallow's Nested, but when serializing, when given a dict
     (rather than a model), just outputs the dict as given.
+
+    We use this to allow developers to skip the model system and instead directly
+    include the desired JMAP structures.
     """
 
     def _serialize(self, nested_obj, attr, obj, **kwargs):
@@ -228,4 +260,47 @@ class CustomNested(fields.Nested):
 
         # Serialize as normal
         return super()._serialize(nested_obj, attr, obj, **kwargs)
+
+
+class CustomUnmarshalField(fields.Field):
+    """
+    If a model uses an attribute with a custom `unmarshal` function, then this field
+    class is used, and it wraps the unmarshal helper. Only here, but not in the pre_load
+    and post hooks marshmallow offers, are we able to consume multiple input fields.
+
+    The other direction, serialization, is implemented differently - as a post_dump
+    hook, because only there do we have the ability to marshal a single field into
+    multiple output keys.
+    """
+
+    def __init__(self, **kwargs):
+        self.unmarshal_func = kwargs.pop('unmarshal_func')
+        self.attr_field = kwargs.pop('attr_field')
+        super().__init__(**kwargs)
+
+    def deserialize(self, value, attr=None, data=None, **kwargs):
+        """
+        By overriding `deserialize` instead of `_deserialize`, we skip the
+        missing/required validation. That's ok - this is all the responsibility of
+        the custom `unmarshal` function.
+        """
+        new_data, keys_used = self.unmarshal_func(data, self.attr_field)
+
+        # We want a single field to be able to consume multiple keys in the input.
+        # Marshamllow by default only removes the key that belongs to the field,
+        # and does so after processing.
+        #
+        # We have to remove the keys that we consumed right now from the data
+        # dict given to us, because we have no access to the logic inside
+        # marshmallow which would do it at the end.
+        #
+        # It's a bit of a hack, because subsequent fields do not see the full
+        # original data dictionary any more (since we modify it here), but it works
+        # and seems to be one of a few bad options.
+        if keys_used:
+            for key in keys_used:
+                del data[key]
+
+        return new_data
+
 
