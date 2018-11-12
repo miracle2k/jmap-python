@@ -3,7 +3,10 @@ Knows how to execute a JMAP request.
 """
 from collections import defaultdict
 from typing import List, Dict, Any
-from jmap.protocol.core import JmapModuleInterface, JMapError, JMapMethodError
+
+from marshmallow import ValidationError
+
+from jmap.protocol.core import JmapModuleInterface, JMapError, JMapMethodError, JMapNotRequest
 from jmap.protocol.jsonpointer import resolve_pointer
 from jmap.protocol.models import JMapRequest, JMapResponse, ResultReference
 
@@ -18,8 +21,8 @@ def resolve_reference(ref: ResultReference, db: Dict[str, Dict[str, Any]]):
     responses = db[ref.result_of]
 
     if not ref.name in responses:
-        raise ValueError('Previous method call with id {} has no response named {}'.format(
-            ref.result_of, ref.name))
+        raise ValueError('Previous method call with id {} has no response named {}, possible values: {}'.format(
+            ref.result_of, ref.name, ", ".join(responses.keys())))
 
     response = responses[ref.name]
 
@@ -60,7 +63,11 @@ class Executor:
             args = method_call.args
             for arg_name in list(args.keys()):
                 if arg_name.startswith('#'):
-                    ref = ResultReference.unmarshal(args[arg_name])
+                    try:
+                        # TODO: Do this earlier during request parsing
+                        ref = ResultReference.unmarshal(args[arg_name])
+                    except ValidationError as exc:
+                        raise JMapNotRequest(str(exc))
                     new_value = resolve_reference(ref, responses_by_client_id)
                     args[arg_name[1:]] = new_value
                     del args[arg_name]

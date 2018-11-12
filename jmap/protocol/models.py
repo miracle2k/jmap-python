@@ -338,7 +338,10 @@ class JMapRequest:
 def parse_methods(data):
     methods = []
     for call in data:
-        method_name, args, client_id = call
+        try:
+            method_name, args, client_id = call
+        except ValueError:
+            raise JMapNotRequest()
         methods.append(MethodCall(name=method_name, args=args, client_id=client_id))
     return methods
 

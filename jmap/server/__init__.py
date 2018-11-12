@@ -84,9 +84,17 @@ def jmap_auth():
 @app.route("/", methods=['POST'])
 @cross_origin(supports_credentials=True)
 def jmap_api():
-    jmap_request = JMapRequest.from_json(request.json)
-    executor = Executor(modules=[CoreModule(), email_module])
-    jmap_response = executor.execute(jmap_request)
+    try:
+        jmap_request = JMapRequest.from_json(request.json)
+    except JMapRequestError as exc:
+        return jsonify(exc.to_json())
+
+    executor = Executor(modules=[CoreModule(), email_module, fallback])
+
+    try:
+        jmap_response = executor.execute(jmap_request)
+    except JMapError as exc:
+        return jsonify(exc.to_json())
 
     return jsonify(jmap_response.to_json())
 
