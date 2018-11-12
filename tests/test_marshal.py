@@ -1,6 +1,7 @@
 """
 Test our custom marshmallow based system to validate input.
 """
+import enum
 
 import attr
 import pytest
@@ -153,3 +154,27 @@ def test_forward_refs():
         sub: Optional["self"]
 
     assert Foo.unmarshal({'id': 1, 'sub': {'id': 2, 'sub': None}}) == Foo(id=1, sub=Foo(id=2, sub=None))
+
+
+def test_enum():
+    """
+    Test Enums.
+    """
+
+    class Color(enum.Enum):
+        red = 'red'
+        green = 'green'
+
+
+    @marshallable
+    @attr.s(auto_attribs=True)
+    class Foo:
+        v: Color
+
+    with pytest.raises(ValidationError):
+        assert Foo.unmarshal({'v': 1}) == Foo(v=1)
+
+    with pytest.raises(ValidationError):
+        assert Foo.unmarshal({'v': 'redd'}) == Foo(v='redd')
+
+    assert Foo.unmarshal({'v': 'red'}) == Foo(v='red')

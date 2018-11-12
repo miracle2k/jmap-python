@@ -8,14 +8,13 @@ type annotations.
 
 See the docstring of `models` to read more about these choices.
 """
-
+import enum
 from datetime import datetime
 from inspect import isclass
 from typing import Union, Dict, List, _ForwardRef, Tuple, Any
 import marshmallow
 import attr
-from marshmallow import ValidationError, post_load, fields
-
+from marshmallow import ValidationError, post_load, fields, validate
 
 NoneType = type(None)
 
@@ -38,6 +37,15 @@ def get_marshmallow_field_class_from_python_type(klass):
     if hasattr(klass, '__marshmallow_schema__'):
         mm_type = CustomNested
         args = {'nested': klass.__marshmallow_schema__}
+
+    # Is it an enum
+    elif issubclass(klass, enum.Enum):
+        mm_type = fields.String
+        args = {
+            'validate': validate.OneOf([c.value for c in klass])
+        }
+
+    # Otherwise, see if this type as a direct mapping to a marshmallow field
     else:
         if not klass in TYPE_MAPPING:
             raise ValueError('%s is not a valid type' % klass)
@@ -127,7 +135,6 @@ def make_marshmallow_field(attr_field):
         required = False
 
     # Convert validators
-    marshmallow_validate = None
     if attr_field.validator:
         def marshmallow_impl(value):
             try:
@@ -139,12 +146,13 @@ def make_marshmallow_field(attr_field):
                 # assume are programming errors and do not catch them.
                 raise ValidationError(str(exc))
 
-        marshmallow_validate = marshmallow_impl
+        assert not 'validate'in field_args
+        field_args['validate'] = marshmallow_impl
+
 
     return field_type(
         data_key=to_camel_case(attr_field.name),
         required=required,
-        validate=marshmallow_validate,
         **field_args
     )
 
