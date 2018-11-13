@@ -3,17 +3,22 @@ For testing, a JMAP server.
 
 TODO: Make this SansIO.
 """
+import os
+import dotenv
+dotenv.load_dotenv()
+
 import attr
 from flask import Flask, request, jsonify, url_for
 from flask.json import JSONEncoder
 from flask_cors import CORS, cross_origin
 
 from jmap.protocol.models import JMapRequest, Account, MAIL_URN
-from jmap.protocol.core import CoreModule
+from jmap.protocol.core import CoreModule, JMapRequestError, JMapError
+from jmap.protocol.fallback import FallbackModule
 from jmap.protocol.executor import Executor
 from jmap.server.accounts import StaticBackend
 from jmap.server.fixture import FixtureEmailModule
-from jmap.server.modules.maildir import MboxModule
+from jmap.server.modules.imap import ImapProxyModule
 
 
 class CustomJSONEncoder(JSONEncoder):
@@ -39,10 +44,17 @@ auth_backend = StaticBackend({
         has_data_for=[MAIL_URN]
     )
 })
-email_module = MboxModule(
-    './samples/sample.mbox',
-    auth_backend=auth_backend
+# email_module = MboxModule(
+#     './samples/sample.mbox',
+#     auth_backend=auth_backend
+# )
+email_module = ImapProxyModule(
+    host=os.environ['IMAP_HOST'],
+    username=os.environ['IMAP_USERNAME'],
+    password=os.environ['IMAP_PASSWORD'],
 )
+
+fallback = FallbackModule(email_module)
 
 
 def validate_request_auth():
