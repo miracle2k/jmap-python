@@ -72,10 +72,15 @@ This is preferable to a custom MyString type, since the types itself are used fo
 MyPy, which it is supposed to be a true string.
 """
 
-from typing import Dict, Any, List, Optional
+from datetime import datetime
+import enum
+from typing import Dict, Any, List, Optional, Union
 import attr
-from jmap.protocol.marshal import marshallable
+from marshmallow import ValidationError
 
+from jmap.protocol.core import JMapNotRequest
+from jmap.protocol.marshal import marshallable, custom_marshal, snakecase, get_marshmallow_field_class_from_python_type, \
+    make_marshmallow_field_from_python_type, to_camel_case
 
 MAIL_URN = 'urn:ietf:params:jmap:mail'
 CALENDARS_URN = 'urn:ietf:params:jmap:calendar'
@@ -83,13 +88,237 @@ CONTACTS_URN = 'urn:ietf:params:jmap:contacts'
 
 
 def PositiveInt(default=None):
+    """The PositiveInt type specified by JMAP.
+
+    This is a `attr.ib` which defines a validator. Use like this:
+
+        @model
+        class Foo:
+            bar: int = PositiveInt(default=42)
+
+    That is, the MyPy type remains an `int`, but the model has a
+    validation logic and a default.
+    """
     def larger_than_0(self, attribute, value):
         if value is not None and value < 0:
             raise ValueError(f'{self.__class__.__name__}.{attribute.name} is a PositiveInt and must be >0, but was given: {value}')
     return attr.ib(validator=larger_than_0, default=default)
 
 
+def ModelPropertyWithHeader(model, **kwargs):
+    """A string type that is restricted to one of the property names of `model`.
+
+    This is a `attr.ib` which defines a validator. Use like this:
+
+        @model
+        class Foo:
+            properties: str = ModelProperty(SomeOtherModel)
+
+    That is, the MyPy type remains an `int`, but the model has a
+    validation logic and a default.
+    """
+
+    all_attrs = [a.name for a in attr.fields(model)]
+
+    def valid_property(self, attribute, value):
+        # This runs when instantiating a model, as well as on umarshal.
+        for item in value:
+            if item in all_attrs:
+                continue
+
+            if isinstance(item, HeaderFieldQuery):
+                continue
+
+            # Can we parse it has a HeaderFieldQuery?
+            try:
+                HeaderFieldQuery.unmarshal(item)
+            except ValidationError:
+                pass
+            else:
+                continue
+
+            raise ValueError(f'{self.__class__.__name__}.{attribute.name} was given "{item}", which is not an allowed value: {all_attrs}')
+
+    def marshal(data, instance, field):
+        """This manually serializes the property to `data`. It:
+
+        - Serializes `header:*` queries.
+        - Converts properties to camcel case.
+        """
+        props = getattr(instance, field.name)
+
+        result = []
+        for item in props:
+            if isinstance(item, HeaderFieldQuery):
+                result.append(str(item))
+            else:
+                result.append(to_camel_case(item))
+
+        data[field.name] = result
+        return data
+
+    def unmarshal(data, field):
+        """This manually initializes the property, given incoming JSON. It:
+
+        - Handles `header:*` queries.
+        - Converts properties to snake case.
+
+        TODO: Support many properly. TODO: It might be nicer to just provide a custom field implementation here
+        for fields.String, which automatically reject non-string types.
+        """
+        data = data.get(field.name)
+
+        result = []
+        for item in data:
+            if HeaderFieldQuery.will_handle(item):
+                result.append(HeaderFieldQuery.unmarshal(item))
+            else:
+                result.append(snakecase(item))
+
+        return result, []
+
+    return attr.ib(
+        validator=valid_property,
+        metadata={
+            'marshal': custom_marshal(marshal=marshal, unmarshal=unmarshal)
+        },
+        **kwargs
+    )
+
+
 model = lambda klass: marshallable(attr.s(auto_attribs=True, kw_only=True)(klass))
+
+
+#### Flatten headers
+
+
+class HeaderFieldForm(enum.Enum):
+    """
+    4.1.2 Header fields parsed forms (https://jmap.io/spec-mail.html#emails)
+    """
+
+    raw = 'Raw'
+    text = 'Text'
+    addresses = 'Addresses'
+    grouped_addresses = 'GroupedAddresses'
+    message_ids = 'MessageIds'
+    date = 'Date'
+    urls = 'Urls'
+
+
+field = make_marshmallow_field_from_python_type(HeaderFieldForm)
+HeaderFieldForm.parse = lambda x: field.deserialize(x)
+
+
+@model
+class HeaderFieldQuery:
+    """
+    In JMAP, header queries can be given as formatted strings in the form:
+
+        header:from
+        header:from:asRaw
+        header:from:asAddresses:all
+    """
+
+    name: str
+    form: Optional[HeaderFieldForm] = HeaderFieldForm.raw
+    all: bool = False
+    original: str = attr.ib(cmp=False, default=None)
+
+    def __str__(self):
+        if self.original:
+            return self.original
+
+        parts = [self.name]
+        if self.form:
+            parts.append(f'as{self.form.value}')
+        if self.all:
+            parts.append('all')
+        return ':'.join(parts)
+
+    @classmethod
+    def will_handle(cls, value: Any):
+        if not isinstance(value, str):
+            return False
+        return value.startswith("header:")
+
+    @classmethod
+    def unmarshal(cls, str, **kwargs):
+        parts = str.split(":")
+        if not parts.pop(0) == 'header':
+            raise ValidationError(f'Not a valid header field query: {str}')
+
+        name = parts.pop(0) if parts else None
+        if not name:
+            raise ValidationError(f'Not a valid header field query: {str}')
+
+        form = HeaderFieldForm.raw
+        all = False
+
+        if parts:
+            if parts[0].startswith('as'):
+                form = parts.pop(0)[2:]
+                form = HeaderFieldForm.parse(form)
+        if parts:
+            if parts[0] == 'all':
+                all = True
+        if parts:
+            raise ValidationError(f'These parts of the header query are unrecognized: {parts} ')
+
+        return cls(name=name, form=form, all=all, original=str, **kwargs)
+
+    def marshal(self):
+        return str(self)
+
+
+@model
+class QueriedHeaderField(HeaderFieldQuery):
+    value: str
+
+    @classmethod
+    def load_with_value(cls, key, value):
+        return super().unmarshal(key, value=value)
+
+    def format_key(self):
+        # Only the super method formats the key properly
+        return super().marshal()
+
+
+def flatten_headers(data, instance, field):
+    """
+    Job: serialize `field` however desired for `instance`, add to `data` (which is already serialized).
+    """
+    items = getattr(instance, field.name)
+    if items:
+        for item in items:
+            data[f'header:{item.format_key()}'] = item.value
+    return data
+
+
+def unflatten_headers(data, field):
+    """
+    Job: serialize `field` however desired for `instance`, add to `data` (which is already serialized).
+    """
+    result = []
+    to_remove = []
+    for key, value in data.items():
+        if key.startswith("header:"):
+            result.append(QueriedHeaderField.load_with_value(key, value=value))
+            to_remove.append(key)
+
+    return result, to_remove
+
+
+def FlattenedHeaderQueries(**kwargs):
+    return attr.ib(
+        metadata={
+            'marshal': custom_marshal(marshal=flatten_headers, unmarshal=unflatten_headers)
+        }
+    )
+
+
+
+###### Base models
 
 
 @model
@@ -106,44 +335,6 @@ class Mailbox:
     parent_id: Optional[str] = None
     role: Optional[str]
     sort_order: int = PositiveInt(default=0)
-
-
-@model
-class EmailHeader:
-    pass
-
-
-@model
-class EmailBodyPart:
-    # 4.1.4 Body Parts
-    part_id: Optional[str] = None
-    blob_id: Optional[str] = None
-    size: int = PositiveInt()
-    headers: List[EmailHeader]
-    name: Optional[str] = None
-    type: str
-    charset: Optional[str] = None
-    disposition: Optional[str] = None
-    cid: Optional[str] = None
-    language: Optional[List[str]] = None
-    location: Optional[str] = None
-    # TODO sub_parts: Optional[List["EmailBodyPart"]] = None
-
-
-@model
-class Email:
-    # 4.1.1 Metadata
-    id: str
-    blob_id: str
-    threadId: str
-    #TODO mailbox_ids: Dict[str, bool]
-    #keywords: Dict[str, bool]
-    size: int = PositiveInt()
-    # TODO received_at
-
-    # 4.1.2 Header fields parsed forms
-    raw: str
-    text: str
 
 
 @model
@@ -173,7 +364,9 @@ class StandardGetArgs:
     """
     account_id: str
     ids: Optional[List[str]] = None
-    properties: Optional[List[str]] = None
+
+    # Properties
+    # properties: Optional[List[str]] = None
 
 
 @model
@@ -192,14 +385,19 @@ class StandardQueryArgs:
     """
     "5.5 /query" (https://jmap.io/spec-core.html#/query)
     """
+
     account_id: str
-    filter: Optional[dict] = None  # TODO
     sort: Optional[List[Comparator]] = None
     position: int = 0
     anchor: Optional[str] = None
     anchor_offset: Optional[int] = None
     limit: Optional[int] = PositiveInt(default=None)
     calculate_total: bool = False
+
+    # TODO: Subclasses need to define this to insert a concrecte type of
+    # FilterCondition. I wonder if we can emply metaclasses to make StandardQueryArgs
+    # more a template than a base class.
+    # filter: Optional[dict] = None  # TODO
 
 
 @model
@@ -208,12 +406,14 @@ class StandardQueryResponse:
     "5.5 /query" (https://jmap.io/spec-core.html#/query)
     """
     account_id: str
-    filter: Optional[dict] = None  # TODO
     query_state: str
     can_calculate_changes: bool
     position: int = PositiveInt()
     total: Optional[int] = PositiveInt(default=None)
     ids: List[str]
+
+
+####### Mailbox/get
 
 
 @model
@@ -226,14 +426,17 @@ class MailboxGetResponse(StandardGetResponse):
     list: List[Mailbox]
 
 
+####### Mailbox/query
+
+
 @model
 class MailboxQueryFilterCondition:
     """2.3 Filter Conditions (https://jmap.io/spec-mail.html#mailbox/query)."""
-    parent_id = Optional[str] = None
-    name = Optional[str] = None
-    role = Optional[str] = None
-    has_any_role = Optional[bool] = None
-    is_subscribed = Optional[bool] = None
+    parent_id: Optional[str] = None
+    name: Optional[str] = None
+    role: Optional[str] = None
+    has_any_role: Optional[bool] = None
+    is_subscribed: Optional[bool] = None
 
 
 @model
@@ -246,33 +449,169 @@ class MailboxQueryResponse(StandardQueryResponse):
     pass
 
 
+####### Email
+
+
+@model
+class EmailAddress:
+    name: Optional[str] = None
+    email: str
+
+
+@model
+class EmailHeader:
+    name: str
+    value: str
+
+
+@model
+class EmailBodyValue:
+    value: str
+    is_encoding_problem: bool = False
+    is_truncated = False
+
+
+@model
+class EmailBodyPart:
+    # 4.1.4 Body Parts
+    part_id: Optional[str] = None
+    blob_id: Optional[str] = None
+    size: int = PositiveInt()
+    headers: List[EmailHeader]
+    name: Optional[str] = None
+    type: str
+    charset: Optional[str] = None
+    disposition: Optional[str] = None
+    cid: Optional[str] = None
+    language: Optional[List[str]] = None
+    location: Optional[str] = None
+    sub_parts: Optional[List["self"]] = None
+
+    # TODO: header: {header - field - name} #:asForm:all
+
+
+@model
+class Email:
+    # https://jmap.io/spec-mail.html#properties-of-the-email-object
+    # 4.1.1 Metadata
+    id: str
+    blob_id: str
+    thread_id: str
+    mailbox_ids: Dict[str, bool]
+    keywords: Dict[str, bool] = attr.ib(default=attr.Factory(dict))
+    size: int = PositiveInt()
+    received_at: datetime
+
+    # 4.1.3 Header fields properties
+    headers: List[EmailHeader]
+
+    # will have special serializtion support in both directions.
+    #
+    # 1. A client or server can specify the object (but no validation there)
+    # 2. When dumping the structure, we flatten the fields
+    # 3. When loading the fields, we unflatten them.
+    header_fields: List[QueriedHeaderField] = FlattenedHeaderQueries()
+
+    # This are shortcuts for particular header queries (also see 4.1.3).
+    #
+    # There is no special handling for those, these model properties are not linked
+    # up with the header field. We need to be able to output only the one or the other,
+    # or both, depending on what the user requested via JMAP.
+    #
+    # However, there are helpers for de-duplicating the shortcuts.
+    message_id: Optional[List[str]] = None
+    in_reply_to: Optional[List[str]] = None
+    references: Optional[List[str]] = None
+    sender: Optional[List[EmailAddress]] = None
+    from_: Optional[List[EmailAddress]] = None
+    to: Optional[List[EmailAddress]] = None
+    cc: Optional[List[EmailAddress]] = None
+    bcc: Optional[List[EmailAddress]] = None
+    reply_to: Optional[List[EmailAddress]] = None
+    subject: Optional[str] = None
+    sent_at: Optional[datetime] = None
+
+    # 4.1.4 Body Parts
+    body_structure: EmailBodyPart
+    body_values: Dict[str, EmailBodyValue]
+    text_body: List[EmailBodyPart]
+    html_body: List[EmailBodyPart]
+    attachments: List[EmailBodyPart]
+    has_attachment: bool
+    preview: str
+
+
+####### Email/get
+
+
+def safe(x):
+    if x == 'from':
+        return f'{x}_'
+    return x
+
+
+DEFAULT_EMAIL_GET_PROPERTIES = list(map(lambda x: safe(snakecase(x)), [
+    "id", "blobId", "threadId", "mailboxIds", "keywords", "size",
+    "receivedAt", "messageId", "inReplyTo", "references", "sender", "from",
+    "to", "cc", "bcc", "replyTo", "subject", "sentAt", "hasAttachment",
+    "preview", "bodyValues", "textBody", "htmlBody", "attachments"
+]))
+
+
 @model
 class EmailGetArgs(StandardGetArgs):
-    pass
+    properties: Optional[List[Union[str, HeaderFieldQuery]]] = \
+        ModelPropertyWithHeader(Email, default=DEFAULT_EMAIL_GET_PROPERTIES)
+
+    body_properties: Optional[List[str]] = None
+    fetch_text_body_values: bool = False
+    fetch_html_body_values: bool = False
+    fetch_all_body_values: bool = False
+    max_body_value_bytes: int = PositiveInt(default=0)
 
 
 @model
 class EmailGetResponse(StandardGetResponse):
     list: List[Email]
 
+
+@model
+class EmailGetResponse(StandardGetResponse):
+    list: List[Email]
+
+
+###### Email/query
 
 @model
 class EmailQueryFilterCondition:
     """4.4.1 Filtering (https://jmap.io/spec-mail.html#mailbox/query)."""
-    in_mailbox = Optional[str] = None
-    in_mailbox_other_than = Optional[List[str]] = None
-    # a lot more
+    in_mailbox: Optional[str] = None
+    in_mailbox_other_than: Optional[List[str]] = None
+    # before, after
+    min_size: Optional[int] = PositiveInt(default=None)
+    max_size: Optional[int] = PositiveInt(default=None)
 
 
 @model
 class EmailQueryArgs(StandardQueryArgs):
-    pass
+    """
+    "4.4 /query" (https://jmap.io/spec-mail.html#email/query)
+    """
+    collapse_threads: bool = False
+
+    # TODO: Must be a union with FilterOperator
+    filter: Optional[EmailQueryFilterCondition] = attr.ib(default=attr.Factory(EmailQueryFilterCondition))
 
 
 @model
-class EmailGetResponse(StandardGetResponse):
-    list: List[Email]
+class EmailQueryResponse(StandardQueryResponse):
+    """
+    "4.4 /query" (https://jmap.io/spec-mail.html#email/query)
+    """
+    collapse_threads: bool
 
+
+###### Thread/get
 
 
 @model
@@ -285,21 +624,7 @@ class ThreadGetResponse(StandardGetResponse):
     list: List[Thread]
 
 
-@model
-class EmailQueryArgs(StandardQueryArgs):
-    """
-    "4.4 /query" (https://jmap.io/spec-mail.html#email/query)
-    """
-    collapse_threads: bool = False
-
-
-@model
-class EmailQueryResponse(StandardQueryResponse):
-    """
-    "4.4 /query" (https://jmap.io/spec-mail.html#email/query)
-    """
-    collapse_threads: bool
-
+###### Others
 
 @attr.s(auto_attribs=True, kw_only=True)
 class MethodCall:

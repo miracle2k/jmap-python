@@ -16,8 +16,7 @@ from inspect import isclass
 from typing import Union, Dict, List, _ForwardRef, Tuple, Any, Optional
 import marshmallow
 import attr
-from marshmallow import ValidationError, post_load, fields, validate, post_dump
-
+from marshmallow import ValidationError, post_load, fields, post_dump, Schema
 
 NoneType = type(None)
 
@@ -208,6 +207,18 @@ def marshallable(attrclass):
     To this end, internally constructs a marshmallow schema based on the type
     definitions, and the attrs validators.
     """
+
+    # If the class itself defines marshal/unmarshal methods, then the model in question
+    # provides, in effect, a custom implementation; we set up a fake __marshmallow_schema__
+    # to wrap those methods. Other code will check for __marshmallow_schema__ when it wants
+    # to dump or load this module, so try to provide this interface.
+    # NB: We do not use hasattr(), but check the dict directly, since we want such a class
+    # to be subclassable; then, we do not want to find the marshal() method of the base class.
+    if 'marshal' in attrclass.__dict__:
+        attrclass.__marshmallow_schema__ = make_manual_schema(attrclass, attrclass.marshal, attrclass.unmarshal)
+        return attrclass
+
+
     attr_fields = attr.fields(attrclass)
     marshmallow_fields = {
         field.name: make_marshmallow_field(field)
@@ -322,6 +333,9 @@ class CustomUnmarshalField(fields.Field):
             for key in keys_used:
                 del data[key]
 
+        # Usually deserialize() calls this, which we replaced here.
+        self._validate(new_data)
+
         return new_data
 
 
@@ -394,7 +408,11 @@ class PolyField(fields.Field):
     """
     Adapted from https://github.com/Bachmann1234/marshmallow-polyfield/blob/master/marshmallow_polyfield/polyfield.py
 
-    However, ours should be smart enough to not need a manual decider.
+    However, ours should be smart enough to not need a manual decider function. Instead,
+    it will check the following to make a decision as to which of the subtypes to parse:
+
+    - The primitives associate with the type (int, str).
+    - In case of a nested model, any key which is unique to that model.
     """
 
     def __init__(
@@ -443,6 +461,20 @@ class PolyField(fields.Field):
         for v in value:
             found = False
 
+            # See if any of the given types has a custom "pick me" helper.
+            # This is an escape hatch to allow for the following JMAP scenario:
+            #    `PolyField([str, HeaderFieldQuery])`
+            # Here, both str and HeaderFieldQuery really expect a string, but we
+            # should first ask HeaderFieldQuery if it can "parse" the string.
+            for pytype in self.union_types:
+                if hasattr(pytype, 'will_handle'):
+                    if pytype.will_handle(v):
+                        schema = pytype.__marshmallow_schema__()
+                        schema.context.update(getattr(self, 'context', {}))
+                        data = schema.load(v)
+                        results.append(data)
+                        continue
+
             # Figure out which type it is
             for pytype, field in self.union_types.items():
                 # This only works with primitives
@@ -483,3 +515,16 @@ class PolyField(fields.Field):
             return results
         else:
             return results[0]
+
+
+def make_manual_schema(attrclass, marshal_func, unmarshal_func):
+    class ManualSchema(Schema):
+
+        def dump(self, obj, many=None):
+            return marshal_func(obj)
+
+        def load(self, data, many=None, partial=None, unknown=None):
+            return unmarshal_func(data)
+
+    return ManualSchema
+

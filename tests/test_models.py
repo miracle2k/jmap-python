@@ -1,25 +1,122 @@
 import json
-from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, Mailbox
-from jmap.server import CustomJSONEncoder
+from datetime import datetime
+
+import pytest
+from marshmallow import ValidationError
+
+from jmap.protocol.models import Email, HeaderFieldQuery, EmailBodyPart, \
+    EmailGetArgs, HeaderFieldForm, QueriedHeaderField
 
 
-def test_mailbox_get_args():
-    mailbox = MailboxGetArgs.unmarshal({
-        'accountId': '13824', 'properties': ['threadId'], 'ids': []})
+
+def test_header_values_in_properties():
+    """
+    EmailGetArgs has a field "properties" which is a complicated case. It lists
+    the properties of `Email` the client wants to query. However, it also:
+
+    - Needs to convert from camelCase to snake_case.
+    - Needs to allow for arbitrary header:* queries.
+    """
+
+    x = EmailGetArgs.unmarshal(dict(
+        accountId="1",
+        properties=[
+            'header:Foo:asMessageIds',
+            'messageId'
+        ]
+    ))
+    assert x.properties == [
+        HeaderFieldQuery(name='Foo', form=HeaderFieldForm.message_ids, all=False),
+        'message_id'
+    ]
+
+    assert x.marshal()['properties'] == ['header:Foo:asMessageIds', 'messageId']
 
 
-def test_mailbox_get_response():
-    response = MailboxGetResponse(
-        account_id='foo',
-        state='123',
-        list=[
-            Mailbox(
-                id='default',
-                name="Mail",
-                role="inbox"
+    # Test error cases:
+
+    with pytest.raises(ValidationError):
+        EmailGetArgs.unmarshal(dict(
+            accountId="1",
+            properties=[
+                'not right',
+            ]
+        ))
+
+    with pytest.raises(ValidationError):
+        EmailGetArgs.unmarshal(dict(
+            accountId="1",
+            properties=[
+                'header:Foo:asMessageIDS',
+            ]
+        ))
+
+    with pytest.raises(ValidationError):
+        EmailGetArgs.unmarshal(dict(
+            accountId="1",
+            properties=[
+                'header:Foo:asdf',
+            ]
+        ))
+
+    with pytest.raises(ValidationError):
+        EmailGetArgs.unmarshal(dict(
+            accountId="1",
+            properties=[
+                'header',
+            ]
+        ))
+
+
+def test_email_header():
+    # This is testing we can use the header:** property when parsing an email
+    em = Email(
+        id='1',
+        blob_id='1',
+        thread_id='1',
+        mailbox_ids={'1': True},
+        size=1,
+        received_at=datetime.utcnow(),
+        headers=[],
+        has_attachment=False,
+        attachments=[],
+        body_structure=EmailBodyPart(headers=[], type=""),
+        preview="",
+        text_body=[],
+        html_body=[],
+        body_values={},
+
+        header_fields=[
+            QueriedHeaderField(
+                name="From",
+                value="1"
             )
-        ],
-        not_found=[]
+        ]
     )
 
-    print(CustomJSONEncoder().encode(response))
+    print(json.dumps(em.marshal(), indent=2))
+    assert em.marshal()['header:From:asRaw'] == "1"
+
+    x = Email.unmarshal({
+      "bodyStructure": {
+        "type": "",
+        "headers": []
+      },
+      "headers": [],
+      "attachments": [],
+      "hasAttachment": False,
+      "preview": "",
+      "mailboxIds": {
+        "1": True
+      },
+      "textBody": [],
+      "id": "1",
+      "htmlBody": [],
+      "bodyValues": {},
+      "threadId": "1",
+      "keywords": {},
+      "blobId": "1",
+      "receivedAt": "2014-12-22T03:12:58.019077+00:00",
+      "size": 1,
+      "header:From:asRaw": "1"
+    })
