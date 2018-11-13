@@ -18,7 +18,12 @@ import marshmallow
 import attr
 from marshmallow import ValidationError, post_load, fields, post_dump, Schema
 
+
 NoneType = type(None)
+
+
+# marshmallow will not dump those into the output
+Missing = marshmallow.missing
 
 
 TYPE_MAPPING = {

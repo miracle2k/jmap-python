@@ -80,7 +80,7 @@ from marshmallow import ValidationError
 
 from jmap.protocol.core import JMapNotRequest
 from jmap.protocol.marshal import marshallable, custom_marshal, snakecase, get_marshmallow_field_class_from_python_type, \
-    make_marshmallow_field_from_python_type, to_camel_case
+    make_marshmallow_field_from_python_type, to_camel_case, Missing
 
 MAIL_URN = 'urn:ietf:params:jmap:mail'
 CALENDARS_URN = 'urn:ietf:params:jmap:calendar'
@@ -100,7 +100,7 @@ def PositiveInt(default=None):
     validation logic and a default.
     """
     def larger_than_0(self, attribute, value):
-        if value is not None and value < 0:
+        if value is not None and value is not Missing and value < 0:
             raise ValueError(f'{self.__class__.__name__}.{attribute.name} is a PositiveInt and must be >0, but was given: {value}')
     return attr.ib(validator=larger_than_0, default=default)
 
@@ -409,7 +409,7 @@ class StandardQueryResponse:
     query_state: str
     can_calculate_changes: bool
     position: int = PositiveInt()
-    total: Optional[int] = PositiveInt(default=None)
+    total: Optional[int] = PositiveInt(default=Missing)
     ids: List[str]
 
 
@@ -432,7 +432,7 @@ class MailboxGetResponse(StandardGetResponse):
 @model
 class MailboxQueryFilterCondition:
     """2.3 Filter Conditions (https://jmap.io/spec-mail.html#mailbox/query)."""
-    parent_id: Optional[str] = None
+    parent_id: Optional[str] = Missing
     name: Optional[str] = None
     role: Optional[str] = None
     has_any_role: Optional[bool] = None
@@ -441,7 +441,8 @@ class MailboxQueryFilterCondition:
 
 @model
 class MailboxQueryArgs(StandardQueryArgs):
-    pass
+    # TODO: Must be a union with FilterOperator
+    filter: Optional[MailboxQueryFilterCondition] = attr.ib(default=attr.Factory(MailboxQueryFilterCondition))
 
 
 @model

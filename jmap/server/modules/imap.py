@@ -1,5 +1,6 @@
 import base64
 import json
+import time
 from email.headerregistry import AddressHeader, DateHeader
 import email.header
 from imaplib import IMAP4
@@ -8,7 +9,8 @@ from typing import Tuple
 from jmap.protocol.core import JMapUnsupportedFilter
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, EmailQueryArgs, EmailQueryResponse, \
-    EmailGetResponse, EmailGetArgs, HeaderFieldQuery, HeaderFieldForm, EmailAddress
+    EmailGetResponse, EmailGetArgs, HeaderFieldQuery, HeaderFieldForm, EmailAddress, MailboxQueryArgs, \
+    MailboxQueryResponse, Mailbox
 from imapclient import IMAPClient
 
 
@@ -52,7 +54,7 @@ class ImapProxyModule(EmailModule):
 
         Folders are identified by name, only. The UIDVALIDITY flag of a folder is supposed
         to increase (and only incraese) when the folder changes identity (is replaced with 
-        a different folder by the same), and implemeentation-wise, if a folder is renamed, 
+        a different folder by the same), and implementation-wise, if a folder is renamed,
         it is likely to remain stable, and dovecot for example uses the folder creation 
         timestamp, so there may very  well be no two folders with the same UIDVALIDITY. 
         However, the last two things are not guaranteed, and so, we cannot use this flag 
@@ -71,37 +73,86 @@ class ImapProxyModule(EmailModule):
         """
 
         # Get all Folders
-        # we could possibly only query the ids given
+        # TODO: We could possibly only query the ids given
         folders = self.client.list_folders()
+        folders = folders_with_parents(folders)
 
-        # group them by parents
         mailboxes = []
-        for (flags, separator, name) in folders:
-            mailboxes.append(Mailbox(
-                # Should we attach the UUIDValidity to the id?
-                id=name,
-                name=name,
-                parent_id=None
+        for (flags, separator, parent, fullname, basename) in folders:
+            mbox_id = make_mailbox_id(fullname, '')
 
+            if args.ids and not mbox_id in args.ids:
+                continue
+                
+            # TODO: Return only the queried properties!
+            mailboxes.append(Mailbox(
+                id=mbox_id,
+                name=basename,
+                parent_id=make_mailbox_id(parent, ''),
+                role=None
             ))
 
         return MailboxGetResponse(
-            account_id=args.account_id
+            account_id=args.account_id,
+            list=mailboxes,
+            not_found=[],
+            state=f'{time.time()}'
         )
 
-    def handle_mailbox_query(self, context, args: MailboxGetArgs):        
+    def handle_mailbox_query(self, context, args: MailboxQueryArgs):
+        # Query all folders
+        # TODO: Rather than handling all filter conditions in Python, we should move them
+        # to the query itself where possible (say the parent_id).
         folders = self.client.list_folders()
-        print(folders)
-        # filter that shit
-        # we could possible limit the list_folder()
+        folders = folders_with_parents(folders)
+
+        # Figure out the parent for each folder
+        with_parent = []
+        for flags, sep, name in folders:
+            parts = name.rsplit(sep.decode('utf-8'), 1)
+            if len(parts) == 1:
+                parent = ''
+                base = parts[0]
+            else:
+                parent, base = parts
+            with_parent.append((flags, sep, parent, name, base))
+
+        filtered = with_parent
+        if args.filter:
+            if args.filter.has_any_role:
+                raise JMapUnsupportedFilter()
+
+            if args.filter.is_subscribed:
+                raise JMapUnsupportedFilter()
+
+            if args.filter.role:
+                raise JMapUnsupportedFilter()
+
+            if args.filter.parent_id:
+                filtered = filter(lambda x: make_mailbox_id(x[2], '') == args.filter.parent_id, filtered)
+
+            if args.filter.name:
+                filtered = filter(lambda x: args.filter.name in x[4], filtered)
+
+        return MailboxQueryResponse(
+            account_id=args.account_id,
+
+            # I don't think we have any value to represent to us when the set of
+            # mailboxes has changed. The set of UIDVALIDITY values comes close,
+            # but we cannot rely on any one of them being unique.
+            query_state=f'{time.time()}',
+
+            # We do not really have a way to figure out which folders changed,
+            # and certainly not the changes for a particular query.
+            can_calculate_changes=False,
+
+            # We could include the UIDVALIDITY, but we'd have to open each folder,
+            # so let's not do that.
+            ids=[make_mailbox_id(folder[3], '') for folder in filtered],
+        )
 
     def handle_mailbox_set(self, context, args: MailboxGetArgs):
-        # self.cache[context.userid, args.account_id]
-        #
-        # how do we get the connection data? can be a pool as well!
-        # self.get_client(
-        folders = self.client.list_folders()
-        print(folders)
+        raise JMapUnsupportedFilter()
 
     # def handle_mailbox_changes(self):
     #     # cannotCalculateChanges
@@ -111,11 +162,6 @@ class ImapProxyModule(EmailModule):
 
     # thread_get
     # thread_changes
-
-    # (folder name, folder UIDVALIDITY, message UID)
-    # Other ideas do not work either: sequence ids can easily change in each session, 
-    #     message-ids may not exist and might not be trustworthy (there could be dups), nor 
-    #     can be query an IMAP server with them.
 
     def handle_email_get(self, context, args: EmailGetArgs) -> EmailGetResponse:
         if not args.ids:
@@ -169,7 +215,6 @@ class ImapProxyModule(EmailModule):
             raise JMapUnsupportedFilter("in_mailbox_other_than is not supported")
 
         # Select the folder in question
-
         try:
             folder = self.client.select_folder(args.filter.in_mailbox, readonly=True)
         except IMAP4.error:
@@ -196,18 +241,49 @@ class ImapProxyModule(EmailModule):
 
         return EmailQueryResponse(
             account_id=args.account_id,
+
             # Our options for the state are UIDNEXT or HIGHESTMODSEQ. Both are imperfect:
             # UIDNEXT does not change if one of the results is deleted, HIGHESTMODSEQ
             # does change when flags are update, which is not desired.
-            query_state=str(folder[b'UIDNEXT']),
-            # We *might* be able to do this by idling, then applying the filter ourselves
+            #
+            # We also add UIDVALIDITY in there, because it is not part of the folder id.
+            # That is, from the JMAP view, folder is never change, even if a folder has
+            # been replaced with a new copy. Instead, we invalidate the query state of
+            # anything that involves the folder.
+            query_state=make_email_state_string(folder[b'UIDNEXT'], folder[b'UIDVALIDITY']),
+
+            # We might be able to do this with the right extensions.
             can_calculate_changes=False,
+
             # Not sure if we can support this.
             collapse_threads=args.collapse_threads,
+
             ids=message_ids,
             position=args.position,  # TODO: Calculate, if it was negative, or needs clamping
             total=len(message_ids) if args.calculate_total else None,  # TODO: Make sure it is missing, not None
         )
+
+    def handle_email_changes(self, context, args: EmailQueryArgs) -> EmailQueryResponse:
+        """
+        # we can never return changes globally for all mailboxes
+        """
+
+    def handle_email_query_changes(self, context, args: EmailQueryArgs) -> EmailQueryResponse:
+        """
+        # we might be able to return changes, but only if the filter is a single mailbox
+        """
+
+
+def make_email_state_string(uidnext, uidvalidity):
+    data = json.dumps([uidnext, uidvalidity]).encode('utf-8')
+    return base64.urlsafe_b64encode(data).rstrip(b"=")
+
+
+def make_mailbox_id(folder_path, uidvalidity):
+    """Generate a folder id, based on the folder name and the folder's UIDVALIDITY.
+    """
+    data = json.dumps([folder_path, uidvalidity]).encode('utf-8')
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode('utf-8')
 
 
 def make_message_id(folder_path, uidvalidity, message_uid):
@@ -215,7 +291,7 @@ def make_message_id(folder_path, uidvalidity, message_uid):
     and the message id.
     """
     data = json.dumps([folder_path, uidvalidity, message_uid]).encode('utf-8')
-    return base64.urlsafe_b64encode(data).rstrip(b"=")
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode('utf-8')
 
 
 def decode_message_id(message_id: str) -> Tuple[str, str, str]:
@@ -320,18 +396,6 @@ def resolve_property(prop):
 
     if isinstance(prop, HeaderFieldQuery):
         prop_name = prop.name.lower()
-        if prop_name == 'subject':
-            return ('BODY.PEEK[HEADER.FIELDS (SUBJECT)]', lambda x: decode_header(x, prop))
-
-        if prop_name == 'from':
-            return ('BODY.PEEK[HEADER.FIELDS (FROM)]', lambda x: decode_header(x, prop))
-
-        if prop_name == 'message-id':
-            return ('BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]', lambda x: decode_header(x, prop))
-
-        if prop_name == 'date':
-            return ('BODY.PEEK[HEADER.FIELDS (DATE)]', lambda x: decode_header(x, prop))
-
         return (f'BODY.PEEK[HEADER.FIELDS ({prop_name.upper()})]', lambda x: decode_header(x, prop))
 
     raise ValueError(prop)
@@ -352,3 +416,21 @@ def parse_message_ids(s):
         result.append(part[1:-1])
 
     return result
+
+
+def folders_with_parents(folders: Tuple):
+    """
+    Given a folder 3-tuple from imaplib, add parent paths.
+    """
+
+    with_parent = []
+    for flags, sep, name in folders:
+        parts = name.rsplit(sep.decode('utf-8'), 1)
+        if len(parts) == 1:
+            parent = ''
+            base = parts[0]
+        else:
+            parent, base = parts
+        with_parent.append((flags, sep, parent, name, base))
+
+    return with_parent
