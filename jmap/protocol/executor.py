@@ -6,7 +6,8 @@ from typing import List, Dict, Any
 
 from marshmallow import ValidationError
 
-from jmap.protocol.core import JmapModuleInterface, JMapError, JMapMethodError, JMapNotRequest
+from jmap.protocol.core import JmapModuleInterface, JMapError, JMapMethodError, JMapNotRequest, \
+    JMapInvalidResultReference
 from jmap.protocol.jsonpointer import resolve_pointer
 from jmap.protocol.models import JMapRequest, JMapResponse, ResultReference
 
@@ -17,11 +18,11 @@ class MethodNotFound(JMapError):
 
 def resolve_reference(ref: ResultReference, db: Dict[str, Dict[str, Any]]):
     if not ref.result_of in db:
-        raise ValueError('Not found a previous method call with id {}'.format(ref.result_of))
+        raise JMapInvalidResultReference('Not found a previous method call with id {}'.format(ref.result_of))
     responses = db[ref.result_of]
 
     if not ref.name in responses:
-        raise ValueError('Previous method call with id {} has no response named {}, possible values: {}'.format(
+        raise JMapInvalidResultReference('Previous method call with id "{}" has no response named "{}", possible names are: {}'.format(
             ref.result_of, ref.name, ", ".join(responses.keys())))
 
     response = responses[ref.name]
@@ -54,35 +55,14 @@ class Executor:
         responses_by_client_id = defaultdict(lambda: {})
 
         for method_call in request.method_calls:
-            # Find the right module
-            if not method_call.name in self.available_methods:
-                raise MethodNotFound(method_call.name)
-            module = self.available_methods[method_call.name]
-
-            # Resolve any references to previous responses
-            args = method_call.args
-            for arg_name in list(args.keys()):
-                if arg_name.startswith('#'):
-                    try:
-                        # TODO: Do this earlier during request parsing
-                        ref = ResultReference.unmarshal(args[arg_name])
-                    except ValidationError as exc:
-                        raise JMapNotRequest(str(exc))
-                    new_value = resolve_reference(ref, responses_by_client_id)
-                    args[arg_name[1:]] = new_value
-                    del args[arg_name]
-
-            # Execute the call
-            response_name = response_data = None
             try:
-                result = module.execute(method_call.name, args)
+                result = self.execute_method(method_call, responses_by_client_id=responses_by_client_id)
             except JMapMethodError as exc:
                 response_name = 'error'
                 response_data = exc.to_json()
             else:
                 response_name = method_call.name
                 response_data = result
-
 
             # Index it
             responses_by_client_id[method_call.client_id][response_name] = response_data
@@ -96,3 +76,25 @@ class Executor:
             )
 
         return JMapResponse(method_responses=method_responses)
+
+    def execute_method(self, method_call, *, responses_by_client_id):
+        # Find the right module
+        if not method_call.name in self.available_methods:
+            raise MethodNotFound(method_call.name)
+        module = self.available_methods[method_call.name]
+
+        # Resolve any references to previous responses
+        args = method_call.args
+        for arg_name in list(args.keys()):
+            if arg_name.startswith('#'):
+                try:
+                    # TODO: Do this earlier during request parsing
+                    ref = ResultReference.unmarshal(args[arg_name])
+                except ValidationError as exc:
+                    raise JMapNotRequest(str(exc))
+                new_value = resolve_reference(ref, responses_by_client_id)
+                args[arg_name[1:]] = new_value
+                del args[arg_name]
+
+        # Execute the call
+        return module.execute(method_call.name, args)

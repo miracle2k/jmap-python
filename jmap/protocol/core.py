@@ -36,6 +36,10 @@ class JMapUnsupportedFilter(JMapMethodError):
     typename = 'unsupportedFilter'
 
 
+class JMapInvalidResultReference(JMapMethodError):
+    typename = 'invalidResultReference'
+
+
 class JMapRequestError(JMapError):
     """
     A request level error  (3.5.1 Request-level errors, https://jmap.io/spec-core.html#errors).
