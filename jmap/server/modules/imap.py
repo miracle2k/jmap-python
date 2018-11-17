@@ -6,7 +6,7 @@ import email.header
 from imaplib import IMAP4
 from typing import Tuple
 
-from jmap.protocol.core import JMapUnsupportedFilter, JmapCannotCalculateChanges
+from jmap.protocol.core import JMapUnsupportedFilter, JmapCannotCalculateChanges, JMapInvalidArguments
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, EmailQueryArgs, EmailQueryResponse, \
     EmailGetResponse, EmailGetArgs, HeaderFieldQuery, HeaderFieldForm, EmailAddress, MailboxQueryArgs, \
@@ -157,10 +157,10 @@ class ImapProxyModule(EmailModule):
         raise JMapUnsupportedFilter()
 
     def handle_mailbox_changes(self, context, args: MailboxChangesArgs) -> MailboxChangesResponse:
+        """
+        IMAP does not really have a way to get folder changes.    
+        """""
         raise JmapCannotCalculateChanges()
-
-    # def handle_mailbox_changes(self):
-    #     # cannotCalculateChanges
 
     # def handle_mailbox_query_changes(self):
     #     # cannotCalculateChanges
@@ -219,9 +219,13 @@ class ImapProxyModule(EmailModule):
         if args.filter.in_mailbox_other_than:
             raise JMapUnsupportedFilter("in_mailbox_other_than is not supported")
 
+
+        mailbox_id, mailbox_uidval = decode_mailbox_id(args.filter.in_mailbox)
+
         # Select the folder in question
         try:
-            folder = self.client.select_folder(args.filter.in_mailbox, readonly=True)
+            folder = self.client.select_folder(mailbox_id, readonly=True)
+            # todo: compare uidvalidity
         except IMAP4.error:
             raise
 
@@ -289,6 +293,17 @@ def make_mailbox_id(folder_path, uidvalidity):
     """
     data = json.dumps([folder_path, uidvalidity]).encode('utf-8')
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode('utf-8')
+
+
+def decode_mailbox_id(mailbox_id: str) -> Tuple[str, str]:
+    """Raises a ValueError if the id is not properly encoded.
+
+    I suggest the caller treats this error as an id that was not found.
+    """
+    mailbox_id += "=" * (-len(mailbox_id) % 4)
+
+    data = json.loads(base64.urlsafe_b64decode(mailbox_id))
+    return data[0], data[1]
 
 
 def make_message_id(folder_path, uidvalidity, message_uid):
@@ -403,7 +418,7 @@ def resolve_property(prop):
         prop_name = prop.name.lower()
         return (f'BODY.PEEK[HEADER.FIELDS ({prop_name.upper()})]', lambda x: decode_header(x, prop))
 
-    raise ValueError(prop)
+    raise JMapInvalidArguments(prop)
 
 
 def parse_message_ids(s):
