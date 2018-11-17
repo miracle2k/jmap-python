@@ -190,9 +190,14 @@ class ImapProxyModule(EmailModule):
             folderpath, uidvalidity, message_uid = item
             self.client.select_folder(folderpath)
             # TODO: validate uidvalidity
-            response = self.client.fetch([message_uid], imap_fields)
-            msg = response[message_uid]
-            print(msg)
+
+            # Query IMAP
+            if imap_fields:
+                response = self.client.fetch([message_uid], imap_fields)
+                msg = response[message_uid]
+                print(msg)
+            else:
+                msg = {}
 
             # now generate the props
             props_out = {}
@@ -244,7 +249,7 @@ class ImapProxyModule(EmailModule):
         # a real, account-wide unique ids, we have to combine folders name,
         # folder UIDVALIDITY, and the actual message uid.
         message_ids = [
-            make_message_id(args.filter.in_mailbox, folder[b'UIDVALIDITY'], uid)
+            make_message_id(mailbox_id, folder[b'UIDVALIDITY'], uid)
             for uid in message_ids
         ]
 
@@ -410,6 +415,9 @@ def resolve_property(prop):
     """
 
     prop = rewrite_convenience_prop_to_header_query(prop)
+
+    if prop == 'thread_id':
+        return None, lambda s: 1
 
     if prop == 'size':
         return ('RFC822.SIZE', lambda s: s)  # XXX: is that the right size value?
