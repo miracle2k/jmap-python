@@ -1,6 +1,7 @@
 """
 Knows how to execute a JMAP request.
 """
+
 from collections import defaultdict
 from typing import List, Dict, Any
 
@@ -8,7 +9,7 @@ from marshmallow import ValidationError
 
 from jmap.protocol.core import JmapModuleInterface, JMapError, JMapMethodError, JMapNotRequest, \
     JMapInvalidResultReference, JMapUnknownMethod
-from jmap.protocol.jsonpointer import resolve_pointer
+from jmap.protocol.jsonpointer import resolve_pointer, JsonPointerException
 from jmap.protocol.models import JMapRequest, JMapResponse, ResultReference
 
 
@@ -17,6 +18,9 @@ class MethodNotFound(JMapError):
 
 
 def resolve_reference(ref: ResultReference, db: Dict[str, Dict[str, Any]]):
+    """
+    Resolve a JMAP reference to a previous method call result.
+    """
     if not ref.result_of in db:
         raise JMapInvalidResultReference('Not found a previous method call with id {}'.format(ref.result_of))
     responses = db[ref.result_of]
@@ -27,7 +31,10 @@ def resolve_reference(ref: ResultReference, db: Dict[str, Dict[str, Any]]):
 
     response = responses[ref.name]
 
-    return resolve_pointer(response.marshal(), ref.path)
+    try:
+        return resolve_pointer(response.marshal(), ref.path)
+    except JsonPointerException as exc:
+        raise JMapInvalidResultReference('{}'.format(exc))
 
 
 class Executor:
