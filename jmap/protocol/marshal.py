@@ -164,7 +164,9 @@ def make_marshmallow_field(attr_field) -> Optional[fields.Field]:
         field_type, field_args = \
             get_marshmallow_field_class_from_mypy_annotation(attr_field.type)
 
-    # Only do not require it if it has a default.
+    # Only do not require it if it has a default. Effectively, marshmallow
+    # will return a dict without that field, and attrs will initialize the
+    # model with the default value.
     if not attr_field.default is attr.NOTHING:
         required = False
 
@@ -308,6 +310,10 @@ class CustomUnmarshalField(fields.Field):
     The other direction, serialization, is implemented differently - as a post_dump
     hook, because only there do we have the ability to marshal a single field into
     multiple output keys.
+
+    This completely takes over processing, including missing/required handling. It is
+    up to those methods to raise an error if the field is supposed to be required.
+    You may return marshmallow.missing.
     """
 
     def __init__(self, **kwargs):
@@ -324,7 +330,7 @@ class CustomUnmarshalField(fields.Field):
         new_data, keys_used = self.unmarshal_func(data, self.attr_field)
 
         # We want a single field to be able to consume multiple keys in the input.
-        # Marshamllow by default only removes the key that belongs to the field,
+        # Marshmallow by default only removes the key that belongs to the field,
         # and does so after processing.
         #
         # We have to remove the keys that we consumed right now from the data

@@ -76,6 +76,7 @@ from datetime import datetime
 import enum
 from typing import Dict, Any, List, Optional, Union
 import attr
+import marshmallow
 from marshmallow import ValidationError
 
 from jmap.protocol.core import JMapNotRequest
@@ -121,6 +122,9 @@ def ModelPropertyWithHeader(model, **kwargs):
     all_attrs = [a.name for a in attr.fields(model)]
 
     def valid_property(self, attribute, value):
+        if value is marshmallow.missing:
+            return
+
         # This runs when instantiating a model, as well as on umarshal.
         for item in value:
             if item in all_attrs:
@@ -167,6 +171,9 @@ def ModelPropertyWithHeader(model, **kwargs):
         for fields.String, which automatically reject non-string types.
         """
         data = data.get(field.name)
+
+        if data is None:
+            return marshmallow.missing, []
 
         result = []
         for item in data:
