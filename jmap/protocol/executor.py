@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 from marshmallow import ValidationError
 
 from jmap.protocol.core import JmapModuleInterface, JMapError, JMapMethodError, JMapNotRequest, \
-    JMapInvalidResultReference
+    JMapInvalidResultReference, JMapUnknownMethod
 from jmap.protocol.jsonpointer import resolve_pointer
 from jmap.protocol.models import JMapRequest, JMapResponse, ResultReference
 
@@ -97,4 +97,7 @@ class Executor:
                 del args[arg_name]
 
         # Execute the call
-        return module.execute(method_call.name, args)
+        try:
+            return module.execute(method_call.name, args)
+        except NotImplementedError:
+            raise JMapUnknownMethod("This method is not implemented.")

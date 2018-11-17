@@ -28,6 +28,10 @@ class JMapMethodError(JMapError):
         return result
 
 
+class JMapUnknownMethod(JMapMethodError):
+    typename = 'unknownMethod'
+
+
 class JMapInvalidArguments(JMapMethodError):
     typename = 'invalidArguments'
 
@@ -38,6 +42,10 @@ class JMapUnsupportedFilter(JMapMethodError):
 
 class JMapInvalidResultReference(JMapMethodError):
     typename = 'invalidResultReference'
+
+
+class JmapCannotCalculateChanges(JMapMethodError):
+    typename ='cannotCalculateChanges'
 
 
 class JMapRequestError(JMapError):

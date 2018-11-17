@@ -401,6 +401,29 @@ class StandardQueryArgs:
 
 
 @model
+class StandardChangesArgs:
+    """
+    "5.2. / changes" (https://jmap.io/spec-core.html#/query)
+    """
+    account_id: str
+    since_state: str
+    max_changes: Optional[int] = PositiveInt(default=None)
+
+
+@model
+class StandardChangesResponse:
+    """
+    "5.2. / changes" (https://jmap.io/spec-core.html#/query)
+    """
+    account_id: str
+    old_state: str
+    new_state: str
+    has_more_changes: bool
+    updated: List[str]
+    destroyed: List[str]
+
+
+@model
 class StandardQueryResponse:
     """
     "5.5 /query" (https://jmap.io/spec-core.html#/query)
@@ -424,6 +447,17 @@ class MailboxGetArgs(StandardGetArgs):
 @model
 class MailboxGetResponse(StandardGetResponse):
     list: List[Mailbox]
+
+
+@model
+class MailboxChangesArgs(StandardChangesArgs):
+    pass
+
+
+@model
+class MailboxChangesResponse(StandardChangesResponse):
+    pass
+
 
 
 ####### Mailbox/query

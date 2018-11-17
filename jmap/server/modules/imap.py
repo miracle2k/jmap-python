@@ -6,11 +6,11 @@ import email.header
 from imaplib import IMAP4
 from typing import Tuple
 
-from jmap.protocol.core import JMapUnsupportedFilter
+from jmap.protocol.core import JMapUnsupportedFilter, JmapCannotCalculateChanges
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, EmailQueryArgs, EmailQueryResponse, \
     EmailGetResponse, EmailGetArgs, HeaderFieldQuery, HeaderFieldForm, EmailAddress, MailboxQueryArgs, \
-    MailboxQueryResponse, Mailbox
+    MailboxQueryResponse, Mailbox, MailboxChangesArgs, MailboxChangesResponse
 from imapclient import IMAPClient
 
 
@@ -20,6 +20,8 @@ class ImapProxyModule(EmailModule):
     1. Try to implement as much as possible without a local cache. Prior art
        here are things like Roundcube or other webmail server backends. context.io
        also seems to have no local cache.
+
+       This is the "online" model of https://tools.ietf.org/html/rfc1733.
 
     2. A version that supports a local cache. Nylas does it like this, as does the
        jmap-perl proxy.
@@ -83,7 +85,7 @@ class ImapProxyModule(EmailModule):
 
             if args.ids and not mbox_id in args.ids:
                 continue
-                
+
             # TODO: Return only the queried properties!
             mailboxes.append(Mailbox(
                 id=mbox_id,
@@ -153,6 +155,9 @@ class ImapProxyModule(EmailModule):
 
     def handle_mailbox_set(self, context, args: MailboxGetArgs):
         raise JMapUnsupportedFilter()
+
+    def handle_mailbox_changes(self, context, args: MailboxChangesArgs) -> MailboxChangesResponse:
+        raise JmapCannotCalculateChanges()
 
     # def handle_mailbox_changes(self):
     #     # cannotCalculateChanges
