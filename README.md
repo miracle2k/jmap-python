@@ -18,3 +18,5 @@ Echo call:
 
     $ http GET localhost:5000/.well-known/jmap
     $ http POST localhost:5000/ using="" methodCalls:=' [[ "Core/echo", {"test": 5}, 1]]  '
+    $ http POST localhost:5000/ using="" methodCalls:=' [[ "Email/query", {"accountId": "1", "filter": {"inMailbox": "inbox"}, "limit": 2}, 1]]  '
+
