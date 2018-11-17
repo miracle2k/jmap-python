@@ -108,18 +108,7 @@ class ImapProxyModule(EmailModule):
         folders = self.client.list_folders()
         folders = folders_with_parents(folders)
 
-        # Figure out the parent for each folder
-        with_parent = []
-        for flags, sep, name in folders:
-            parts = name.rsplit(sep.decode('utf-8'), 1)
-            if len(parts) == 1:
-                parent = ''
-                base = parts[0]
-            else:
-                parent, base = parts
-            with_parent.append((flags, sep, parent, name, base))
-
-        filtered = with_parent
+        filtered = folders
         if args.filter:
             if args.filter.has_any_role:
                 raise JMapUnsupportedFilter()
