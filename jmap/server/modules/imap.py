@@ -405,6 +405,39 @@ def resolve_property(prop):
 
     prop = rewrite_convenience_prop_to_header_query(prop)
 
+    if prop == 'id':
+        return None, lambda s: 1
+
+    if prop == 'blob_id':
+        return None, lambda s: 1
+
+    if prop == 'mailbox_ids':
+        return None, lambda s: []
+
+    if prop == 'keywords':
+        return None, lambda s: []
+
+    if prop == 'received_at':
+        return None, lambda s: None # XXX
+
+    if prop == 'has_attachment':
+        return None, lambda s: False
+
+    if prop == 'preview':
+        return None, lambda s: 'foo'
+
+    if prop == 'body_values':
+        return None, lambda s: []
+
+    if prop == 'text_body':
+        return None, lambda s: ''
+
+    if prop == 'html_body':
+        return None, lambda s: ''
+
+    if prop == 'attachments':
+        return None, lambda s: []
+
     if prop == 'thread_id':
         return None, lambda s: 1
 
@@ -415,7 +448,7 @@ def resolve_property(prop):
         prop_name = prop.name.lower()
         return (f'BODY.PEEK[HEADER.FIELDS ({prop_name.upper()})]', lambda x: decode_header(x, prop))
 
-    raise JMapInvalidArguments(prop)
+    raise JMapInvalidArguments(f"Unknown property: {prop}")
 
 
 def parse_message_ids(s):
@@ -424,7 +457,7 @@ def parse_message_ids(s):
     in the wild, so we have to do this ourselves.
     """
 
-    parts = [part.strip() for part in s.strip().split(' ')]
+    parts = [p for p in [part.strip() for part in s.strip().split(' ')] if p]
 
     result = []
     for part in parts:
