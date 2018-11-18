@@ -384,7 +384,13 @@ class StandardGetResponse:
     account_id: str
     state: str
     not_found: List[str]
-    #list: List[*]
+
+    def __init_subclass__(cls, *, type):
+        if not '__annotations__' in cls.__dict__:
+            cls.__annotations__ = {}
+
+        cls.__annotations__['list'] = List[type]
+        return cls
 
 
 @model
@@ -395,7 +401,8 @@ class StandardQueryArgs:
 
     def __init_subclass__(cls, *, filter):
         # TODO: Must be a union with FilterOperator
-        cls.__annotations__ = {}
+        if not '__annotations__' in cls.__dict__:
+            cls.__annotations__ = {}
         cls.__annotations__['filter'] = Optional[filter]
         cls.filter = attr.ib(default=attr.Factory(filter))
         return cls
@@ -454,8 +461,8 @@ class MailboxGetArgs(StandardGetArgs):
 
 
 @model
-class MailboxGetResponse(StandardGetResponse):
-    list: List[Mailbox]
+class MailboxGetResponse(StandardGetResponse, type=Mailbox):
+    pass
 
 
 @model
@@ -614,12 +621,7 @@ class EmailGetArgs(StandardGetArgs):
 
 
 @model
-class EmailGetResponse(StandardGetResponse):
-    list: List[Email]
-
-
-@model
-class EmailGetResponse(StandardGetResponse):
+class EmailGetResponse(StandardGetResponse, type=Email):
     list: List[Email]
 
 
@@ -660,8 +662,21 @@ class ThreadGetArgs(StandardGetArgs):
 
 
 @model
-class ThreadGetResponse(StandardGetResponse):
-    list: List[Thread]
+class ThreadGetResponse(StandardGetResponse, type=Thread):
+    pass
+
+
+###### Thread/changes
+
+
+@model
+class ThreadChangesArgs(StandardChangesArgs):
+    pass
+
+
+@model
+class ThreadChangesResponse(StandardChangesResponse):
+    pass
 
 
 ###### Others
