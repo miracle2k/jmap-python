@@ -393,6 +393,13 @@ class StandardQueryArgs:
     "5.5 /query" (https://jmap.io/spec-core.html#/query)
     """
 
+    def __init_subclass__(cls, *, filter):
+        # TODO: Must be a union with FilterOperator
+        cls.__annotations__ = {}
+        cls.__annotations__['filter'] = Optional[filter]
+        cls.filter = attr.ib(default=attr.Factory(filter))
+        return cls
+
     account_id: str
     sort: Optional[List[Comparator]] = None
     position: int = 0
@@ -400,11 +407,6 @@ class StandardQueryArgs:
     anchor_offset: Optional[int] = None
     limit: Optional[int] = PositiveInt(default=None)
     calculate_total: bool = False
-
-    # TODO: Subclasses need to define this to insert a concrecte type of
-    # FilterCondition. I wonder if we can emply metaclasses to make StandardQueryArgs
-    # more a template than a base class.
-    # filter: Optional[dict] = None  # TODO
 
 
 @model
@@ -481,9 +483,8 @@ class MailboxQueryFilterCondition:
 
 
 @model
-class MailboxQueryArgs(StandardQueryArgs):
-    # TODO: Must be a union with FilterOperator
-    filter: Optional[MailboxQueryFilterCondition] = attr.ib(default=attr.Factory(MailboxQueryFilterCondition))
+class MailboxQueryArgs(StandardQueryArgs, filter=MailboxQueryFilterCondition):
+    pass
 
 
 @model
@@ -635,14 +636,11 @@ class EmailQueryFilterCondition:
 
 
 @model
-class EmailQueryArgs(StandardQueryArgs):
+class EmailQueryArgs(StandardQueryArgs, filter=EmailQueryFilterCondition):
     """
     "4.4 /query" (https://jmap.io/spec-mail.html#email/query)
     """
     collapse_threads: bool = False
-
-    # TODO: Must be a union with FilterOperator
-    filter: Optional[EmailQueryFilterCondition] = attr.ib(default=attr.Factory(EmailQueryFilterCondition))
 
 
 @model
