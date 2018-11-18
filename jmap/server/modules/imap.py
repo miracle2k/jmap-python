@@ -1,3 +1,104 @@
+"""This implements a mail-module for jmap-python which proxies to an IMAP server,
+without keeping a local copy of the emails. To do this, in acts in a manner fit
+to be considered an "online IMAP client" as defined in RFC 1733.
+
+Because the capabilities of the IMAP protocol are fairly limited, and many servers
+are further limited by a lack of support for certain IMAP extensions, while the
+JMAP spec requires us to provide a great number of features, this backend will
+always be limited in the subset of the JMAP functionality it can provide. In certain
+cases, we may bend the "no data storage" rule to temporarily cache certain information,
+such as message id <-> thread mappings, to work around limitations in IMAP.
+
+Implementation-wise we might want to look towards webmail backends (e.g. Roundcube),
+or context.io (which seems to function as a proxy). However, note that these can limit
+themselves to the features they choose, which is likely less than JMAP requires.
+
+------
+Issues
+------
+
+# Mailboxes
+
+JMAP requires us to be able to:
+
+- Query a particular folder by id.
+- Describe the current mailbox list as a "state".
+
+## The ID
+
+There are no folder ids in IMAP, only the folder name/path, so we can only use that name
+for the concept of a "mailbox id". The UIDVALIDITY is not suitable, because it is not
+guaranteed to be unique (even if on some servers there is a good change that it would be).
+
+The UIDVALIDITY flag of a folder is supposed to increase (and only increase) when the folder
+changes identity (is replaced with a different folder by the same).
+
+We could make the folder id a combination of path and UIDVALIDITY. However, this increases
+the complexity: Accessing UIDVALIDITY in IMAP requires us to issue a separate "select"
+command for each folder. However, the only difference would be that clients would not expect
+a folder changed in this way to contain the emails that were previously known to be in the
+folder. However, our messages themselves must already carry the folder UIDVALIDITY in their
+id, because there are no globally-unique ids in IMAP either. In other words:
+
+- We can never detect an IMAP folder being renamed; it would always be a new folder.
+- If an IMAP folder is replaced, for can tell, but for our JMAP clients it is as if
+  the folder is still the same, but has been cleared of all previous messages, and a new
+  set of messages has been added to it.
+
+
+# Messages
+
+JMAP requires us to be able to:
+
+- Query a particular message by id.
+
+There are no global IDs in IMAP - they are folder-specific. There is the message-id in the
+header of an email, but using this has issues, too:
+
+- It's not clear how reliable it really is - there could be duplicates.
+- There might be performance issues on some servers - the value might not be indexed.
+- Because IMAP only allows us to search in a single folder at a time, it is difficult to
+  answer a JMAP query for a particular message id - we would not know in which folder to
+  look.
+
+Rather, we use a 3-tuple (folderpath, folder-uidvalidity, message-uid) as an id for
+individual messages. This means that in practice, messages are bound to their folder. When
+moved to a different folder, they would be treated as a different email.
+
+About UIDs in IMAP, see also: https://tools.ietf.org/html/rfc3501#section-2.3.1.1
+
+# Threads
+
+Three types of IMAP servers:
+
+- Those that do not understand threads at all.
+- Those that support the basic THREADS extension, in which case we can search
+  for messages in a folder, and get them back grouped by thread.
+- Dovecot, which supports the experimental INTHREAD search
+  (https://tools.ietf.org/html/draft-ietf-morg-inthread-01) - but does not advertise
+  it as a capability (see https://www.dovecot.org/doc/NEWS-1.2, v1.2.0 2009-07-01).
+- GMail, which exposes some limited threading info.
+
+This is also discussed here: https://stackoverflow.com/a/16862688/15677
+
+We are asked here to return all the emails in a thread. Except for Dovecot then,
+we cannot get this information via IMAP. The best we can do is keep the mapping
+client-side.
+
+
+
+Other useful links:
+-------------------
+
+https://wiki.mozilla.org/Thunderbird:IMAP_RFC_4551_Implementation
+https://www.imapwiki.org/ClientImplementation
+https://lwn.net/Articles/680722/ (use gmail ids where available)
+
+The Nylas sync engine (https://github.com/nylas/sync-engine/blob/b91b94b9a0033be4199006eb234d270779a04443/inbox/crispin.py)
+has some prior art regarding connection pools, for example.
+"""
+
+
 import base64
 import json
 import time
@@ -15,35 +116,6 @@ from imapclient import IMAPClient
 
 
 class ImapProxyModule(EmailModule):
-    """Goals:
-
-    1. Try to implement as much as possible without a local cache. Prior art
-       here are things like Roundcube or other webmail server backends. context.io
-       also seems to have no local cache.
-
-       This is the "online" model of https://tools.ietf.org/html/rfc1733.
-
-    2. A version that supports a local cache. Nylas does it like this, as does the
-       jmap-perl proxy.
-
-    A server which supports all the features should be able to be just pass-through
-    (QRESYNC - https://tools.ietf.org/html/rfc7162, even threads can be supported -
-    https://tools.ietf.org/html/rfc5256), but lacking this, what are our options?
-
-    Links:
-
-    https://wiki.mozilla.org/Thunderbird:IMAP_RFC_4551_Implementation
-    https://www.imapwiki.org/ClientImplementation
-    https://lwn.net/Articles/680722/
-        use gmail ids where available
-
-    Definitely have a look at:
-        https://github.com/nylas/sync-engine/blob/b91b94b9a0033be4199006eb234d270779a04443/inbox/crispin.py
-    for some previous art.
-
-    TODO:
-    - cannotCalculateChanges
-    """
 
     def __init__(self, host, username, password):
         super().__init__()
@@ -52,28 +124,6 @@ class ImapProxyModule(EmailModule):
         print(self.client.capabilities())
 
     def handle_mailbox_get(self, context, args: MailboxGetArgs):
-        """There are no folder ids in IMAP.
-
-        Folders are identified by name, only. The UIDVALIDITY flag of a folder is supposed
-        to increase (and only incraese) when the folder changes identity (is replaced with 
-        a different folder by the same), and implementation-wise, if a folder is renamed,
-        it is likely to remain stable, and dovecot for example uses the folder creation 
-        timestamp, so there may very  well be no two folders with the same UIDVALIDITY. 
-        However, the last two things are not guaranteed, and so, we cannot use this flag 
-        for an id. Can it be used for state? 
-
-        Also of note: Accessing UIDVALIDITY requires us to inspect each folder individually.
-
-        The UIDNEXT field we can trust will go only up and will only change if there are new
-        messages, or if the folder is reset via UIDVALIDITY. Since it can be reset, I am
-        not sure if can serve as a `state`.        
-
-        What would a proper folder id help us with anyway here?; it's not enoough to implement
-        the /changes resource, certainly.
-
-        (also see https://tools.ietf.org/html/rfc3501#section-2.3.1.1)
-        """
-
         # Get all Folders
         # TODO: We could possibly only query the ids given
         folders = self.client.list_folders()
