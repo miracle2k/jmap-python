@@ -412,10 +412,10 @@ def resolve_property(prop):
         return None, lambda s: 1
 
     if prop == 'mailbox_ids':
-        return None, lambda s: []
+        return None, lambda s: {}
 
     if prop == 'keywords':
-        return None, lambda s: []
+        return None, lambda s: {}
 
     if prop == 'received_at':
         return None, lambda s: None # XXX
@@ -427,7 +427,7 @@ def resolve_property(prop):
         return None, lambda s: 'foo'
 
     if prop == 'body_values':
-        return None, lambda s: []
+        return None, lambda s: {}
 
     if prop == 'text_body':
         return None, lambda s: ''
