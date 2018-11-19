@@ -106,12 +106,14 @@ from email.headerregistry import AddressHeader, DateHeader
 import email.header
 from imaplib import IMAP4
 from typing import Tuple
+import attr
 
 from jmap.protocol.core import JMapUnsupportedFilter, JmapCannotCalculateChanges, JMapInvalidArguments
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, EmailQueryArgs, EmailQueryResponse, \
     EmailGetResponse, EmailGetArgs, HeaderFieldQuery, HeaderFieldForm, EmailAddress, MailboxQueryArgs, \
-    MailboxQueryResponse, Mailbox, MailboxChangesArgs, MailboxChangesResponse
+    MailboxQueryResponse, Mailbox, MailboxChangesArgs, MailboxChangesResponse, Email, EmailProperties, ThreadGetArgs, \
+    ThreadGetResponse, ThreadChangesArgs, ThreadChangesResponse, Thread
 from imapclient import IMAPClient
 
 
@@ -213,7 +215,7 @@ class ImapProxyModule(EmailModule):
             raise JMapUnsupportedFilter()
 
         # TODO: split into folders
-        query = [decode_message_id(mid) for mid in args.ids]
+        message_ids = [decode_message_id(mid) for mid in args.ids]
 
         # Given a set of properties the client wants to query, figure out which properties
         # *we* have to request from the IMAP server. Some of the JMAP properties map
@@ -225,15 +227,14 @@ class ImapProxyModule(EmailModule):
                 imap_fields.add(imap_field)
 
         found_list = []
-        for item in query:
-            folderpath, uidvalidity, message_uid = item
-            self.client.select_folder(folderpath)
+        for mesage_id in message_ids:
+            self.client.select_folder(mesage_id.folderpath)
             # TODO: validate uidvalidity
 
             # Query IMAP
             if imap_fields:
-                response = self.client.fetch([message_uid], imap_fields)
-                msg = response[message_uid]
+                response = self.client.fetch([mesage_id.uid], imap_fields)
+                msg = response[mesage_id.uid]
                 print(msg)
             else:
                 msg = {}
@@ -245,9 +246,12 @@ class ImapProxyModule(EmailModule):
                 fimap_field = imap_field.replace('.PEEK', '').encode('utf-8') if imap_field else None
                 value = msg[fimap_field] if fimap_field else None
 
-                props_out[str(prop)] = getter(value)
+                context = {
+                    'mesage_id': mesage_id
+                }
+                props_out[str(prop)] = getter(value, context)
 
-            found_list.append(props_out)
+            found_list.append(EmailProperties(**props_out))
 
         return EmailGetResponse(
             account_id=args.account_id,
@@ -326,6 +330,43 @@ class ImapProxyModule(EmailModule):
         # we might be able to return changes, but only if the filter is a single mailbox
         """
 
+    def handle_thread_get(self, context, args: ThreadGetArgs) -> ThreadGetResponse:
+        """
+        """
+        if not args.ids:
+            # TODO: Which error should be return?
+            raise JMapUnsupportedFilter('You can only query for threads with specific ids')
+
+        native_ids = [decode_message_id(id) for id in args.ids]
+
+        threads = []
+
+        # group by folder!
+        for folderpath, uidvalidity, uid in native_ids:
+            self.client.select_folder(folderpath)
+            message_ids = self.client.thread(criteria=['INTHREAD', 'REFS', 'UID', uid])[0]
+
+            # TODO: How to deal with the properties here??
+            thread = Thread(
+                id=make_message_id(folderpath, uidvalidity, uid),
+                email_ids=[make_message_id(folderpath, uidvalidity, m) for m in message_ids]
+            )
+            threads.append(thread)
+
+        return ThreadGetResponse(
+            account_id=args.account_id,
+            state='test',
+            not_found=[],
+            list=threads
+        )
+
+    def handle_thread_changes(self, context, args: ThreadChangesArgs) -> ThreadChangesResponse:
+        """TODO: We can only possible support this by querying for mail changes, being then
+        able to figure out the threads for each mail, seing if a thread is new or removed, or
+        has been updated. Though one.
+        """
+        raise JMapInvalidArguments()
+
 
 def make_email_state_string(uidnext, uidvalidity):
     data = json.dumps([uidnext, uidvalidity]).encode('utf-8')
@@ -358,7 +399,14 @@ def make_message_id(folder_path, uidvalidity, message_uid):
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode('utf-8')
 
 
-def decode_message_id(message_id: str) -> Tuple[str, str, str]:
+@attr.s(auto_attribs=True)
+class ImapMesageId:
+    folderpath: str
+    uidvalidity: str
+    uid: str
+
+
+def decode_message_id(message_id: str) -> ImapMesageId:
     """Raises a ValueError if the id is not properly encoded.
 
     I suggest the caller treats this error as an id that was not found.
@@ -366,7 +414,7 @@ def decode_message_id(message_id: str) -> Tuple[str, str, str]:
     message_id += "=" * (-len(message_id) % 4)
 
     data = json.loads(base64.urlsafe_b64decode(message_id))
-    return data[0], data[1], data[2]
+    return ImapMesageId(folderpath=data[0], uidvalidity=data[1], uid=data[2])
 
 
 def decode_header(header_value: bytes, query: HeaderFieldQuery):
@@ -456,47 +504,48 @@ def resolve_property(prop):
     prop = rewrite_convenience_prop_to_header_query(prop)
 
     if prop == 'id':
-        return None, lambda s: 1
+        return None, lambda s, c: 1
 
     if prop == 'blob_id':
-        return None, lambda s: 1
+        return None, lambda s, c: 1
 
     if prop == 'mailbox_ids':
-        return None, lambda s: {}
+        return None, lambda s, c: {}
 
     if prop == 'keywords':
-        return None, lambda s: {}
+        return None, lambda s, c: {}
 
     if prop == 'received_at':
-        return None, lambda s: None # XXX
+        return None, lambda s, c: None # XXX
 
     if prop == 'has_attachment':
-        return None, lambda s: False
+        return None, lambda s, c: False
 
     if prop == 'preview':
-        return None, lambda s: 'foo'
+        return None, lambda s, c: 'foo'
 
     if prop == 'body_values':
-        return None, lambda s: {}
+        return None, lambda s, c: {}
 
     if prop == 'text_body':
-        return None, lambda s: ''
+        return None, lambda s, c: ''
 
     if prop == 'html_body':
-        return None, lambda s: ''
+        return None, lambda s, c: ''
 
     if prop == 'attachments':
-        return None, lambda s: []
+        return None, lambda s, c: []
 
     if prop == 'thread_id':
-        return None, lambda s: 1
+        return None, lambda s, c: make_message_id(
+            c['message_id'].folderpath, c['message_id'].uidvalidity, c['message_id'].uid)
 
     if prop == 'size':
-        return ('RFC822.SIZE', lambda s: s)  # XXX: is that the right size value?
+        return ('RFC822.SIZE', lambda s, c: s)  # XXX: is that the right size value?
 
     if isinstance(prop, HeaderFieldQuery):
         prop_name = prop.name.lower()
-        return (f'BODY.PEEK[HEADER.FIELDS ({prop_name.upper()})]', lambda x: decode_header(x, prop))
+        return (f'BODY.PEEK[HEADER.FIELDS ({prop_name.upper()})]', lambda x, c: decode_header(x, prop))
 
     raise JMapInvalidArguments(f"Unknown property: {prop}")
 
