@@ -247,7 +247,7 @@ class ImapProxyModule(EmailModule):
                 value = msg[fimap_field] if fimap_field else None
 
                 context = {
-                    'mesage_id': mesage_id
+                    'message_id': mesage_id
                 }
                 props_out[str(prop)] = getter(value, context)
 
@@ -342,14 +342,14 @@ class ImapProxyModule(EmailModule):
         threads = []
 
         # group by folder!
-        for folderpath, uidvalidity, uid in native_ids:
-            self.client.select_folder(folderpath)
-            message_ids = self.client.thread(criteria=['INTHREAD', 'REFS', 'UID', uid])[0]
+        for thread_id in native_ids:
+            self.client.select_folder(thread_id.folderpath)
+            message_ids = self.client.thread(criteria=['INTHREAD', 'REFS', 'UID', thread_id.uid])[0]
 
             # TODO: How to deal with the properties here??
             thread = Thread(
-                id=make_message_id(folderpath, uidvalidity, uid),
-                email_ids=[make_message_id(folderpath, uidvalidity, m) for m in message_ids]
+                id=make_message_id(thread_id.folderpath, thread_id.uidvalidity, thread_id.uid),
+                email_ids=[make_message_id(thread_id.folderpath, thread_id.uidvalidity, m) for m in message_ids]
             )
             threads.append(thread)
 
