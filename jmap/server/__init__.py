@@ -25,8 +25,8 @@ class CustomJSONEncoder(JSONEncoder):
 
     def default(self, obj):
         if attr.has(type(obj)):
-            if getattr(obj, 'marshal'):
-                return obj.marshal()
+            if getattr(obj, 'to_client'):
+                return obj.to_client()
             return attr.asdict(obj)
         return JSONEncoder.default(self, obj)
 

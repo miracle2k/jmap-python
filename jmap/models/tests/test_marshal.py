@@ -2,14 +2,11 @@
 Test our custom marshmallow based system to validate input.
 """
 import enum
-
-import attr
 import pytest
-from marshmallow import ValidationError, fields
-from jmap.protocol.marshal import marshallable, custom_marshal, PolyField
+from marshmallow import ValidationError, fields, Schema
+from jmap.models import model, attrib
+from ..marshal import custom_marshal, PolyField
 from typing import Optional, List, Dict, Union
-
-from jmap.protocol.models import model
 
 
 def test_optional():
@@ -17,21 +14,20 @@ def test_optional():
     Ensure tying.Optional[] does it's job.
     """
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Foo:
         role: Optional[int]
 
     with pytest.raises(ValidationError):
-        Foo.unmarshal({})
+        Foo.from_server({})
 
-    assert Foo.unmarshal({'role': None}) == Foo(role=None)
+    assert Foo.from_server({'role': None}) == Foo(role=None)
 
     with pytest.raises(ValidationError):
         # Ensure type is passed through properly
-        Foo.unmarshal({'role': True})
+        Foo.from_server({'role': True})
 
-    assert Foo.unmarshal({'role': 5}) == Foo(role=5)
+    assert Foo.from_server({'role': 5}) == Foo(role=5)
 
 
 def test_required():
@@ -39,20 +35,18 @@ def test_required():
     Test required status is properly  handled
     """
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Bar:
         foo: int
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Baz:
         foo: int = 3
 
     with pytest.raises(ValidationError):
-        Bar.unmarshal({})
-    assert Baz.unmarshal({}) == Baz()
-    assert Baz.unmarshal({'foo': 1}) == Baz(foo=1)
+        Bar.from_server({})
+    assert Baz.from_server({}) == Baz()
+    assert Baz.from_server({'foo': 1}) == Baz(foo=1)
 
 
 def test_validators():
@@ -64,14 +58,13 @@ def test_validators():
         if not value == 42:
             raise ValueError('value is not 42')
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Bar:
-        foo: float = attr.ib(validator=must_be_42)
+        foo: float = attrib(validator=must_be_42)
 
     with pytest.raises(ValidationError):
-        Bar.unmarshal({'foo': 2})
-    Bar.unmarshal({'foo': 42})
+        Bar.from_server({'foo': 2})
+    Bar.from_server({'foo': 42})
 
 
 def test_nested_objects():
@@ -79,19 +72,17 @@ def test_nested_objects():
     Ensure that we can nest objects.
     """
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Foo:
         name: str
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Bar:
         foo: Foo
 
     with pytest.raises(ValidationError):
-        Bar.unmarshal({'foo': {'name': 2}})
-    assert Bar.unmarshal({'foo': {'name': 'test'}}) == Bar(foo=Foo(name='test'))
+        Bar.from_server({'foo': {'name': 2}})
+    assert Bar.from_server({'foo': {'name': 'test'}}) == Bar(foo=Foo(name='test'))
 
 
 def test_list_of_primitive():
@@ -99,12 +90,11 @@ def test_list_of_primitive():
     Test a list of a primitive.
     """
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Foo:
         names: List[str]
 
-    assert Foo.unmarshal({'names': ['a', 'b']}) == Foo(names=['a', 'b'])
+    assert Foo.from_server({'names': ['a', 'b']}) == Foo(names=['a', 'b'])
 
 
 def test_list_of_optional():
@@ -112,23 +102,21 @@ def test_list_of_optional():
     Test List[Optional[*] vs Optional[List[*]]
     """
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class OptionalItem:
         names: List[Optional[str]]
 
-    assert OptionalItem.unmarshal({'names': ['a', None]}) == OptionalItem(names=['a', None])
+    assert OptionalItem.from_server({'names': ['a', None]}) == OptionalItem(names=['a', None])
     with pytest.raises(ValidationError):
-        assert OptionalItem.unmarshal({'names': None}) == OptionalItem(names=None)
+        assert OptionalItem.from_server({'names': None}) == OptionalItem(names=None)
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class OptionalList:
         names: Optional[List[str]]
 
     with pytest.raises(ValidationError):
-        assert OptionalList.unmarshal({'names': ['a', None]}) == OptionalList(names=['a', None])
-    assert OptionalList.unmarshal({'names': None}) == OptionalList(names=None)
+        assert OptionalList.from_server({'names': ['a', None]}) == OptionalList(names=['a', None])
+    assert OptionalList.from_server({'names': None}) == OptionalList(names=None)
 
 
 def test_dict_of_primitive():
@@ -136,12 +124,11 @@ def test_dict_of_primitive():
     Test a dict of a primitive.
     """
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Foo:
         names: Dict[str, bool]
 
-    assert Foo.unmarshal({'names': {'a': True, 'b': False}}) == Foo(names={'a': True, 'b': False})
+    assert Foo.from_server({'names': {'a': True, 'b': False}}) == Foo(names={'a': True, 'b': False})
 
 
 def test_forward_refs():
@@ -149,13 +136,12 @@ def test_forward_refs():
     Test forward references.
     """
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Foo:
         id: int
         sub: Optional["self"]
 
-    assert Foo.unmarshal({'id': 1, 'sub': {'id': 2, 'sub': None}}) == Foo(id=1, sub=Foo(id=2, sub=None))
+    assert Foo.from_server({'id': 1, 'sub': {'id': 2, 'sub': None}}) == Foo(id=1, sub=Foo(id=2, sub=None))
 
 
 def test_enum():
@@ -168,20 +154,19 @@ def test_enum():
         green = 'green'
 
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Foo:
         v: Color
 
-    assert Foo.marshal(Foo(v=Color.red)) == {'v': 'red'}
+    assert Foo.to_server(Foo(v=Color.red)) == {'v': 'red'}
 
     with pytest.raises(ValidationError):
-        assert Foo.unmarshal({'v': 1}) == Foo(v=1)
+        assert Foo.from_server({'v': 1}) == Foo(v=1)
 
     with pytest.raises(ValidationError):
-        assert Foo.unmarshal({'v': 'redd'}) == Foo(v='redd')
+        assert Foo.from_server({'v': 'redd'}) == Foo(v='redd')
 
-    assert Foo.unmarshal({'v': 'red'}) == Foo(v=Color.red)
+    assert Foo.from_server({'v': 'red'}) == Foo(v=Color.red)
 
 
 def test_custom_marshal_functions():
@@ -204,11 +189,11 @@ def test_custom_marshal_functions():
 
     @model
     class Foo:
-        v: int = attr.ib(metadata={'marshal': custom_marshal(dump, load)})
+        v: int = attrib(metadata={'marshal': custom_marshal(dump, load)})
 
-    assert Foo.marshal(Foo(v=1)) == {1: 'v'}
+    assert Foo.to_server(Foo(v=1)) == {1: 'v'}
 
-    assert Foo.unmarshal({'x': 'red', 'y': 'blue'}) == Foo(v=7)
+    assert Foo.from_server({'x': 'red', 'y': 'blue'}) == Foo(v=7)
 
 
 def test_union_with_multiple_types():
@@ -220,12 +205,11 @@ def test_union_with_multiple_types():
     class A:
         a: str
 
-    @marshallable
-    @attr.s(auto_attribs=True)
+    @model
     class Foo:
         names: List[Union[str, A]]
 
-    assert Foo.unmarshal({'names': ['a', {'a': '3'}]}) == Foo(names=['a', A(a='3')])
+    assert Foo.from_server({'names': ['a', {'a': '3'}]}) == Foo(names=['a', A(a='3')])
 
 
 class TestPolyfield:
@@ -269,6 +253,7 @@ class TestPolyfield:
             A: None,
             B: None
         })
+        f.parent = Schema(context={'use_server_fields': True})
 
         assert f.serialize('x', {'x': A(shared='s', a='a')}) == {'shared': 's', 'a': 'a'}
         assert f.serialize('x', {'x': B(shared=3, b='b')}) == {'shared': 3, 'b': 'b'}
@@ -282,3 +267,25 @@ class TestPolyfield:
 
         with pytest.raises(ValidationError):
             assert f.deserialize(1) == {}
+
+
+def test_partial_serialize():
+    """
+    When serializing a model, default values should not be included unless set
+    explicitly.
+    """
+
+    @model
+    class Foo:
+        role: Optional[int]
+
+    with pytest.raises(ValidationError):
+        Foo.from_server({})
+
+    assert Foo.from_server({'role': None}) == Foo(role=None)
+
+    with pytest.raises(ValidationError):
+        # Ensure type is passed through properly
+        Foo.from_server({'role': True})
+
+    assert Foo.from_server({'role': 5}) == Foo(role=5)

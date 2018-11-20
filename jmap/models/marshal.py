@@ -6,17 +6,53 @@ Use the `@marshallable` decorator on a attr class, and it will add two
 methods, `cls.unmarshal` and `instance.marshal` - based on the Python 3
 type annotations.
 
-See the docstring of `models` to read more about these choices.
+
+Ultimately, the result will be that:
+
+1. You have the unmodified attr behaviour, which means:
+
+    - Creating a model instance will validate attribute existence,
+      and run custom validators, but will not validate types.
+
+    - Properties which have a default value need not be specified.
+
+2. The marshmallow deserialization helpers will:
+
+    - Will also validate the property keys, like attrs.
+    - It will run any attr validation code.
+    - It will further validate the types of all properties, including
+      nested structures.
+    - Will convert from camelCase keys to snake_keys names in Python,
+      and accounts for some reserved identifiers like "from" as well.
+    - It can have some custom logic.
+    - Optional properties will be skipped by marshmallow, and as such
+      will be initialized by `attrs` to their `attrs`-defaults.
+    - The client-side version will fail if a server-side attribute
+      is provided.
+
+3. The marshmallow serialization helpers will:
+
+    - Enforce that the values inside the `attrs`-model are of the
+      correct type.
+    - Converts from internal snake_case properties to camelCase in
+      JSON, and accounts for Python reserved identifier-avoiding
+      renames such as "from_".
+    - The client-side version will ignore any server-side attributes.
+-
 """
+
 import enum
 import re
 from collections import Counter
 from datetime import datetime
+from functools import partial
 from inspect import isclass
 from typing import Union, Dict, List, _ForwardRef, Tuple, Any, Optional
 import marshmallow
-import attr
 from marshmallow import ValidationError, post_load, fields, post_dump, Schema
+
+from jmap.models.attrs import NOTHING, fields as get_fields, attrs, attrib
+from jmap.models.utils import get_set_attrs
 
 
 NoneType = type(None)
@@ -35,10 +71,10 @@ TYPE_MAPPING = {
 }
 
 
-@attr.attrs
+@attrs
 class custom_marshal:
-    marshal = attr.ib()
-    unmarshal = attr.ib()
+    marshal = attrib()
+    unmarshal = attrib()
 
 
 def get_marshmallow_field_class_from_python_type(klass):
@@ -47,12 +83,12 @@ def get_marshmallow_field_class_from_python_type(klass):
         return klass, {}
 
     # Is this another marshallable data class?
-    if hasattr(klass, '__marshmallow_schema__'):
+    if hasattr(klass, '__marshmallow_schemas__'):
         mm_type = CustomNested
-        args = {'nested': klass.__marshmallow_schema__}
+        args = {'nested': klass}
 
     # Is it an enum
-    elif issubclass(klass, enum.Enum):
+    elif isinstance(klass, type) and issubclass(klass, enum.Enum):
         mm_type = EnumField
         args = {'enum': klass, 'by_value': True}
 
@@ -66,17 +102,16 @@ def get_marshmallow_field_class_from_python_type(klass):
     return mm_type, args
 
 
-def make_marshmallow_field_from_python_type(klass):
-    mm_type, args = get_marshmallow_field_class_from_python_type(klass)
-    return mm_type(**args)
-
-
 def get_marshmallow_field_class_from_mypy_annotation(mypy_type) -> Tuple[Any, Dict]:
     # If a forward reference is given, use the forward reference system of
     # marshmallow. Return a fields.Nested field class with the target type
     # given as a string.
     if isinstance(mypy_type, _ForwardRef):
         return CustomNested, {'nested': mypy_type.__forward_arg__}
+
+    # Any types we read as "Raw"
+    if mypy_type is Any:
+        return fields.Raw, {}
 
     # Resolve MyPy types. Have a look at how this is done in pydantic.fields.py:_populate_sub_fields
     # Indicates a MyPy type; those hide their real type because
@@ -125,7 +160,7 @@ def get_marshmallow_field_class_from_mypy_annotation(mypy_type) -> Tuple[Any, Di
         elif isclass(real_mypy_type) and issubclass(real_mypy_type, Dict):
             key_type, value_type = mypy_type.__args__
             key_field = make_marshmallow_field_from_python_type(key_type)
-            value_field = make_marshmallow_field_from_python_type(value_type)
+            value_field = make_marshmallow_field_class_from_mypy_annotation(value_type)
 
             field_type = fields.Dict
             field_args = {
@@ -138,6 +173,16 @@ def get_marshmallow_field_class_from_mypy_annotation(mypy_type) -> Tuple[Any, Di
     # Is this another marshallable data class?
     field_type, field_args = get_marshmallow_field_class_from_python_type(mypy_type)
     return field_type, field_args
+
+
+def make_marshmallow_field_from_python_type(klass):
+    mm_type, args = get_marshmallow_field_class_from_python_type(klass)
+    return mm_type(**args)
+
+
+def make_marshmallow_field_class_from_mypy_annotation(mypy_type) -> Tuple[Any, Dict]:
+    mm_type, args = get_marshmallow_field_class_from_mypy_annotation(mypy_type)
+    return mm_type(**args)
 
 
 def make_marshmallow_field(attr_field) -> Optional[fields.Field]:
@@ -167,7 +212,7 @@ def make_marshmallow_field(attr_field) -> Optional[fields.Field]:
     # Only do not require it if it has a default. Effectively, marshmallow
     # will return a dict without that field, and attrs will initialize the
     # model with the default value.
-    if not attr_field.default is attr.NOTHING:
+    if not attr_field.default is NOTHING:
         required = False
 
     # Convert validators
@@ -197,37 +242,60 @@ def make_marshmallow_field(attr_field) -> Optional[fields.Field]:
     )
 
 
-def unmarshall_func(cls, input: Dict):
-    schema = cls.__marshmallow_schema__()
+def unmarshall_func(cls, input: Dict, *, use_server_fields):
+    schema = cls.__marshmallow_schemas__['server' if use_server_fields else 'client']()
+    schema.context = {
+        'use_server_fields': use_server_fields
+    }
     return schema.load(input)
 
 
-def marshall_func(self):
-    schema = self.__marshmallow_schema__()
-    return schema.dump(self)
+def make_marshall_func(*, use_server_fields):
+    def marshall_func(self):
+        schema = self.__marshmallow_schemas__['server' if use_server_fields else 'client']()
+        schema.context = {
+            'use_server_fields': use_server_fields
+        }
+        return schema.dump(get_set_attrs(self))
+    return  marshall_func
+
+
+def get_schema_from_model_for_context(model_class, context):
+    schema = model_class.__marshmallow_schemas__
+    if context['use_server_fields']:
+        return schema['server']
+    return schema['client']
 
 
 def marshallable(attrclass):
-    """Adds a `marshal` classmethod to the attrs class to create the class from
-    incoming unstructured data with validation.
+    """Adds `marshal`  and `unmarshal` classmethods to the attrs class to create the
+    class from incoming unstructured data with validation.
 
     To this end, internally constructs a marshmallow schema based on the type
     definitions, and the attrs validators.
     """
 
     # If the class itself defines marshal/unmarshal methods, then the model in question
-    # provides, in effect, a custom implementation; we set up a fake __marshmallow_schema__
-    # to wrap those methods. Other code will check for __marshmallow_schema__ when it wants
+    # provides, in effect, a custom implementation; we set up a fake __marshmallow_schemas__
+    # to wrap those methods. Other code will check for __marshmallow_schemas__ when it wants
     # to dump or load this module, so try to provide this interface.
     # NB: We do not use hasattr(), but check the dict directly, since we want such a class
     # to be subclassable; then, we do not want to find the marshal() method of the base class.
     if 'marshal' in attrclass.__dict__:
-        attrclass.__marshmallow_schema__ = make_manual_schema(attrclass, attrclass.marshal, attrclass.unmarshal)
+        manual_schema = make_manual_schema(attrclass, attrclass.marshal, attrclass.unmarshal)
+        attrclass.__marshmallow_schemas__ = {
+            'server': manual_schema,
+            'client': manual_schema
+        }
         return attrclass
 
-
-    attr_fields = attr.fields(attrclass)
-    marshmallow_fields = {
+    attr_fields = get_fields(attrclass)
+    marshmallow_client_fields = {
+        field.name: make_marshmallow_field(field)
+        for field in attr_fields
+        if not field.metadata.get('server_set')
+    }
+    marshmallow_server_fields = {
         field.name: make_marshmallow_field(field)
         for field in attr_fields
     }
@@ -249,19 +317,29 @@ def marshallable(attrclass):
 
     def process_dumped_result(self, data, original):
         # Fields have the ability to provide a hook to customize how they are serialized.
-        for field in attr.fields(attrclass):
+        for field in get_fields(attrclass):
             marshal_helper = field.metadata.get('marshal', None)
             if marshal_helper:
                 data = marshal_helper.marshal(data, original, field)
         return data
 
-    marshmallow_fields['_internal_make_object'] = post_load(make_object)
-    marshmallow_fields['_internal_post_dump_object'] = post_dump(process_dumped_result, pass_original=True)
+    for fieldset in (marshmallow_server_fields, marshmallow_client_fields):
+        fieldset['_internal_make_object'] = post_load(make_object)
+        fieldset['_internal_post_dump_object'] = post_dump(process_dumped_result, pass_original=True)
 
-    marshmallow_schema = type(f'{attrclass}Schema', (marshmallow.Schema,), marshmallow_fields)
-    attrclass.__marshmallow_schema__ = marshmallow_schema
-    attrclass.unmarshal = classmethod(unmarshall_func)
-    attrclass.marshal = marshall_func
+    marshmallow_client_schema = type(f'{attrclass}Schema', (marshmallow.Schema,), marshmallow_client_fields)
+    marshmallow_server_schema = type(f'{attrclass}Schema', (marshmallow.Schema,), marshmallow_server_fields)
+
+    attrclass.__marshmallow_schemas__ = {
+        'server': marshmallow_server_schema,
+        'client': marshmallow_client_schema,
+    }
+
+    attrclass.to_server = make_marshall_func(use_server_fields=False)
+    attrclass.from_server = classmethod(partial(unmarshall_func, use_server_fields=True))
+    attrclass.to_client = make_marshall_func(use_server_fields=True)
+    attrclass.from_client = classmethod(partial(unmarshall_func, use_server_fields=False))
+
     return attrclass
 
 
@@ -281,12 +359,38 @@ def snakecase(string):
 
 class CustomNested(fields.Nested):
     """
-    Like marshmallow's Nested, but when serializing, when given a dict
-    (rather than a model), just outputs the dict as given.
+    Like marshmallow's Nested, but two differences:
 
-    We use this to allow developers to skip the model system and instead directly
-    include the desired JMAP structures.
+     - When serializing, when given a dict (rather than a model), just outputs the
+       dict as given.
+
+       We use this to allow developers to skip the model system and instead directly
+       include the desired JMAP structures.
+
+    - Second, it picks the right schema to use based on the context.
     """
+
+    def __init__(self, nested, **kwargs):
+        fields.Nested.__init__(self, None, **kwargs)
+        self.nested_class = nested
+
+    @property
+    def nested(self):
+        # We need to support string references ourselves here, since marshmallow itself
+        # only deals in marshmallow schemas.
+        if isinstance(self.nested_class, str):
+            if self.nested_class == 'self':
+                return self.parent.__class__
+            else:
+                raise ValueError('not yet supported')
+
+        return get_schema_from_model_for_context(self.nested_class, self.parent.context)
+
+    @nested.setter
+    def nested(self, value):
+        # Parent tries to do that
+        pass
+
 
     def _serialize(self, nested_obj, attr, obj, **kwargs):
         dump_dict = False
@@ -445,9 +549,9 @@ class PolyField(fields.Field):
             # Figure out which type it is
             for pytype, field_class in self.union_types.items():
                 if isinstance(v, pytype):
-                    if hasattr(pytype, '__marshmallow_schema__'):
+                    if hasattr(pytype, '__marshmallow_schemas__'):
                         # Indicates that we expect pytype to be a model
-                        schema_class = pytype.__marshmallow_schema__
+                        schema_class = get_schema_from_model_for_context(pytype, self.parent.context)
                         schema = schema_class()
                         schema.context.update(getattr(self, 'context', {}))
                         data = schema.dump(v)
@@ -480,7 +584,8 @@ class PolyField(fields.Field):
             for pytype in self.union_types:
                 if hasattr(pytype, 'will_handle'):
                     if pytype.will_handle(v):
-                        schema = pytype.__marshmallow_schema__()
+                        schema_class = get_schema_from_model_for_context(pytype, self.parent.context)
+                        schema = schema_class()
                         schema.context.update(getattr(self, 'context', {}))
                         data = schema.load(v)
                         results.append(data)
@@ -498,8 +603,11 @@ class PolyField(fields.Field):
                 if isinstance(v, dict):
                     # See if we can recognize it by the keys
                     # Get all the schemas involved
-                    schemas = [k.__marshmallow_schema__ for k in self.union_types.keys()
-                        if hasattr(k, '__marshmallow_schema__')]
+                    schemas = [
+                        get_schema_from_model_for_context(k, self.parent.context)
+                        for k in self.union_types.keys()
+                        if hasattr(k, '__marshmallow_schemas__')
+                    ]
 
                     # Figure out those keys which are unique across all schemas
                     keys_for_schema = [set(s._declared_fields.keys()) for s in schemas]

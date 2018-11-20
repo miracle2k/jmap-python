@@ -18,7 +18,7 @@ def test_header_values_in_properties():
     - Needs to allow for arbitrary header:* queries.
     """
 
-    x = EmailGetArgs.unmarshal(dict(
+    x = EmailGetArgs.from_server(dict(
         accountId="1",
         properties=[
             'header:Foo:asMessageIds',
@@ -30,13 +30,13 @@ def test_header_values_in_properties():
         'message_id'
     ]
 
-    assert x.marshal()['properties'] == ['header:Foo:asMessageIds', 'messageId']
+    assert x.to_server()['properties'] == ['header:Foo:asMessageIds', 'messageId']
 
 
     # Test error cases:
 
     with pytest.raises(ValidationError):
-        EmailGetArgs.unmarshal(dict(
+        EmailGetArgs.from_server(dict(
             accountId="1",
             properties=[
                 'not right',
@@ -44,7 +44,7 @@ def test_header_values_in_properties():
         ))
 
     with pytest.raises(ValidationError):
-        EmailGetArgs.unmarshal(dict(
+        EmailGetArgs.from_server(dict(
             accountId="1",
             properties=[
                 'header:Foo:asMessageIDS',
@@ -52,7 +52,7 @@ def test_header_values_in_properties():
         ))
 
     with pytest.raises(ValidationError):
-        EmailGetArgs.unmarshal(dict(
+        EmailGetArgs.from_server(dict(
             accountId="1",
             properties=[
                 'header:Foo:asdf',
@@ -60,7 +60,7 @@ def test_header_values_in_properties():
         ))
 
     with pytest.raises(ValidationError):
-        EmailGetArgs.unmarshal(dict(
+        EmailGetArgs.from_server(dict(
             accountId="1",
             properties=[
                 'header',
@@ -94,10 +94,10 @@ def test_email_header():
         ]
     )
 
-    print(json.dumps(em.marshal(), indent=2))
-    assert em.marshal()['header:From:asRaw'] == "1"
+    print(json.dumps(em.to_server(), indent=2))
+    assert em.to_server()['header:From:asRaw'] == "1"
 
-    x = Email.unmarshal({
+    x = Email.from_server({
       "bodyStructure": {
         "type": "",
         "headers": []

@@ -112,7 +112,7 @@ from jmap.protocol.core import JMapUnsupportedFilter, JmapCannotCalculateChanges
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, EmailQueryArgs, EmailQueryResponse, \
     EmailGetResponse, EmailGetArgs, HeaderFieldQuery, HeaderFieldForm, EmailAddress, MailboxQueryArgs, \
-    MailboxQueryResponse, Mailbox, MailboxChangesArgs, MailboxChangesResponse, Email, EmailProperties, ThreadGetArgs, \
+    MailboxQueryResponse, Mailbox, MailboxChangesArgs, MailboxChangesResponse, Email, ThreadGetArgs, \
     ThreadGetResponse, ThreadChangesArgs, ThreadChangesResponse, Thread
 from imapclient import IMAPClient
 
@@ -251,7 +251,7 @@ class ImapProxyModule(EmailModule):
                 }
                 props_out[str(prop)] = getter(value, context)
 
-            found_list.append(EmailProperties(**props_out))
+            found_list.append(Email.properties(**props_out))
 
         return EmailGetResponse(
             account_id=args.account_id,

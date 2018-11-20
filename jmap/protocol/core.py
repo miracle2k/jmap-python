@@ -139,7 +139,7 @@ class JmapBaseModule(JmapModuleInterface):
             arg_object = input
         else:
             try:
-                arg_object = type.unmarshal(input)
+                arg_object = type.from_client(input)
             except ValidationError as exc:
                 raise JMapInvalidArguments(str(exc))
 

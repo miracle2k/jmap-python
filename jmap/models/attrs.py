@@ -1,3 +1,35 @@
+"""
+This is a copy of `attrs`, with one particular change:
+
+- Attributes with default values are NOT set in __init__ if not specified.
+  The __init__ signature has a default value of NOTHING, and if not provided
+  by the user, the attribute remains unset.
+
+- There is a __getattr__ implementation that provides the default value
+  dynamically as long as the attribute is unset.
+
+This allows us to find out if an attribute has ever been set by the user.
+
+----
+
+Note: There might be a hacky way to accomplish this with unmodified `attrs`:
+
+The challenge: We want to accept these args within init, but we do not want
+the attribute to exist if it remains at the default value. Thus we do the f
+ollowing:
+
+- Set the default to NOTHING, or another special value, but keep the real
+  default in the metadata.
+- In the attrs post_init hook, remove any such keys from the class again.
+- Provide a __getattr__ to the class which returns the real default for a
+  missing attribute
+- Or, we could also use a __getattribute__ which hides any NOTHING attribute
+  (in which case we do not need the post init at all).
+
+The cost of maintaining our own copy of `attrs` may not be worth it, and this
+hack preferable.
+"""
+
 from __future__ import absolute_import, division, print_function
 
 import copy
@@ -43,7 +75,6 @@ def import_ctypes():
     Moved into a function for testability.
     """
     import ctypes
-
     return ctypes
 
 
@@ -86,30 +117,24 @@ def make_set_closure_cell():
 set_closure_cell = make_set_closure_cell()
 
 
-_run_validators = True
-
-
 class _config:
-    @staticmethod
-    def set_run_validators(run):
+    _run_validators = True
+
+    @classmethod
+    def set_run_validators(cls, run):
         """
         Set whether or not validators are run.  By default, they are run.
         """
         if not isinstance(run, bool):
             raise TypeError("'run' must be bool.")
-        global _run_validators
-        _run_validators = run
+        cls._run_validators = run
 
-    @staticmethod
-    def get_run_validators():
+    @classmethod
+    def get_run_validators(cls):
         """
         Return whether or not validators are run.
         """
-        return _run_validators
-
-
-
-
+        return cls._run_validators
 
 
 class FrozenInstanceError(AttributeError):
@@ -806,6 +831,13 @@ class _ClassBuilder(object):
             )
         )
 
+        # The __getattr__ is an extensions of __init__, to handle defaults
+        self._cls_dict["__getattr__"] = self._add_method_dunders(
+            _make_getattr(
+                self._attrs,
+            )
+        )
+
         return self
 
     def add_cmp(self):
@@ -1406,6 +1438,26 @@ def _add_init(cls, frozen):
     return cls
 
 
+def _make_getattr(attrs):
+    attrs = {a.name: a for a in attrs}
+
+    def __getattr__(self, name):
+        if name in attrs:
+            if attrs[name].default is not NOTHING:
+                default = attrs[name].default
+                if isinstance(default, Factory):
+                    # TODO: Support takes_self
+                    value = default.factory()
+                    # Factory attributes are special, they are initialized
+                    # on access.
+                    setattr(self, name, value)
+                    return value
+                else:
+                    return default
+        raise AttributeError(name)
+    return __getattr__
+
+
 def fields(cls):
     """
     Return the tuple of ``attrs`` attributes for a class.
@@ -1569,14 +1621,14 @@ def _attrs_to_init_script(
     else:
         # Not frozen.
         def fmt_setter(attr_name, value):
-            return "self.%(attr_name)s = %(value)s" % {
+            return "if %(value)s is not NOTHING:\n        self.%(attr_name)s = %(value)s" % {
                 "attr_name": attr_name,
                 "value": value,
             }
 
         def fmt_setter_with_converter(attr_name, value_var):
             conv_name = _init_converter_pat.format(attr_name)
-            return "self.%(attr_name)s = %(conv)s(%(value_var)s)" % {
+            return "if %(value_var)s is not NOTHING:\n        self.%(attr_name)s = %(conv)s(%(value_var)s)" % {
                 "attr_name": attr_name,
                 "value_var": value_var,
                 "conv": conv_name,
@@ -1590,6 +1642,8 @@ def _attrs_to_init_script(
     # Injecting this into __init__ globals lets us avoid lookups.
     names_for_globals = {}
     annotations = {"return": None}
+
+    do_not_set_defaults = True
 
     for a in attrs:
         if a.validator:
@@ -1642,8 +1696,11 @@ def _attrs_to_init_script(
                             ),
                         )
                     )
-        elif a.default is not NOTHING and not has_factory:
-            arg = "{arg_name}=attr_dict['{attr_name}'].default".format(
+        elif a.default is not NOTHING and (not has_factory or do_not_set_defaults):
+            # arg = "{arg_name}=attr_dict['{attr_name}'].default".format(
+            #     arg_name=arg_name, attr_name=attr_name
+            # )
+            arg ="{arg_name}=NOTHING".format(
                 arg_name=arg_name, attr_name=attr_name
             )
             if a.kw_only:
@@ -1657,7 +1714,7 @@ def _attrs_to_init_script(
                 ] = a.converter
             else:
                 lines.append(fmt_setter(attr_name, arg_name))
-        elif has_factory:
+        elif has_factory and not do_not_set_defaults:
             arg = "{arg_name}=NOTHING".format(arg_name=arg_name)
             if a.kw_only:
                 kw_only_args.append(arg)
@@ -1715,9 +1772,10 @@ def _attrs_to_init_script(
         for a in attrs_to_validate:
             val_name = "__attr_validator_{}".format(a.name)
             attr_name = "__attr_{}".format(a.name)
-            lines.append(
-                "    {}(self, {}, self.{})".format(val_name, attr_name, a.name)
-            )
+            lines.extend([
+                "    if hasattr(self, '{}'):".format(a.name),
+                "        {}(self, {}, self.{})".format(val_name, attr_name, a.name)
+            ])
             names_for_globals[val_name] = a.validator
             names_for_globals[attr_name] = a
     if post_init:

@@ -32,7 +32,7 @@ def resolve_reference(ref: ResultReference, db: Dict[str, Dict[str, Any]]):
     response = responses[ref.name]
 
     try:
-        return resolve_pointer(response.marshal(), ref.path)
+        return resolve_pointer(response.to_client(), ref.path)
     except JsonPointerException as exc:
         raise JMapInvalidResultReference('{}'.format(exc))
 
@@ -96,7 +96,7 @@ class Executor:
             if arg_name.startswith('#'):
                 try:
                     # TODO: Do this earlier during request parsing
-                    ref = ResultReference.unmarshal(args[arg_name])
+                    ref = ResultReference.from_client(args[arg_name])
                 except ValidationError as exc:
                     raise JMapNotRequest(str(exc))
                 new_value = resolve_reference(ref, responses_by_client_id)

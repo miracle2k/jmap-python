@@ -1,61 +1,5 @@
 """Objects representing the various data objects used in JMAP.
 
-What we want from those objects:
-
-1) The should be fun to use from Python, when building servers or clients,
-   providing for some amount of validation to help the programmer achieve
-   correctness.
-
-2) We need to be able to take unstructured, untrusted data coming from clients,
-   validate it, and convert it into those objects.
-
-In addition:
-
-3) We like to use snake_case internally, but the JMAP APIs use camelCase.
-4) JMAP also has the concept of allowing properties to be selected, and requiring an
-   error if a given property name is invalid, so the models help us there too, knowing
-   which fields exist.
-
-`marshmallow` is suboptimal for (1). `dataclasses` have limitation such
-as subclassing. attrs allows us to use keyword-only arguments to avoid
-subclassing issues, but both do not do well enough at validating input.
-`pydantic` has a good idea validating with Python type annotations, but
-has some warts, and it's models are not as nice as does of `attr`.
-
-`attr` is pretty nice, it gives us:
-
-- Very nice Python models.
-- MyPy annotations.
-- (Some) runtime validation (arguments itself and custom validators, but
-  not types) - that is good enough for now.
-
-What we really need in addition to that is validating incoming JSON
-- see (2). What this really means is (on top of just calling
-`Model(**data)`:
-
-- Validating the types (`attr` does not do this).
-- Also running the type validation that attrs does not do at runtime.
-- Properly handling nested objects as well.
-- Giving us validation error messages pointing to specific fields.
-
-Some options I considered:
-
-- `cattrs` - does not output proper validation error messages.
-- `pydantic` - does not work with `attr` classes (dataclasses are suopported!).
-  I am not sure about it coercing types (for example True becomes 'True' -
-  see https://github.com/samuelcolvin/pydantic/issues/284)
-  Do we want to follow the robustness principle (https://en.wikipedia.org/wiki/Robustness_principle)
-  and do those kinds of coercions?
-
-We could make `pydantic` make with `attr` by writing a custom version of `pydantic.create_model.`
-But at this point, we might just as well create a marshmallow model, which is more powerful, and
-has no trouble with things such as camelCase/snakeCase.
-
-And that is what we build in the `marshal.py` model.
-
-
--------------
-
 JMAP type guide:
 
 String|null (default: null) ===>  Optional[str] = None
@@ -66,7 +10,7 @@ In our models, Optional[str] allows None, but the type attribute needs to given.
 
 To give more information to an attribute, such as validation logic, write:
 
-Optional[str] = attr.ib()
+Optional[str] = attrib()
 
 This is preferable to a custom MyString type, since the types itself are used for
 MyPy, which it is supposed to be a true string.
@@ -75,13 +19,14 @@ MyPy, which it is supposed to be a true string.
 from datetime import datetime
 import enum
 from typing import Dict, Any, List, Optional, Union
-import attr
 import marshmallow
 from marshmallow import ValidationError
 
+from jmap.models import model, attrib, Factory, fields
 from jmap.protocol.core import JMapNotRequest
-from jmap.protocol.marshal import marshallable, custom_marshal, snakecase, get_marshmallow_field_class_from_python_type, \
+from jmap.models.marshal import custom_marshal, snakecase, \
     make_marshmallow_field_from_python_type, to_camel_case, Missing
+
 
 MAIL_URN = 'urn:ietf:params:jmap:mail'
 CALENDARS_URN = 'urn:ietf:params:jmap:calendar'
@@ -91,7 +36,7 @@ CONTACTS_URN = 'urn:ietf:params:jmap:contacts'
 def PositiveInt(default=None):
     """The PositiveInt type specified by JMAP.
 
-    This is a `attr.ib` which defines a validator. Use like this:
+    This is a `attrib` which defines a validator. Use like this:
 
         @model
         class Foo:
@@ -103,13 +48,13 @@ def PositiveInt(default=None):
     def larger_than_0(self, attribute, value):
         if value is not None and value is not Missing and value < 0:
             raise ValueError(f'{self.__class__.__name__}.{attribute.name} is a PositiveInt and must be >0, but was given: {value}')
-    return attr.ib(validator=larger_than_0, default=default)
+    return attrib(validator=larger_than_0, default=default)
 
 
 def ModelPropertyWithHeader(model, **kwargs):
     """A string type that is restricted to one of the property names of `model`.
 
-    This is a `attr.ib` which defines a validator. Use like this:
+    This is a `attrib` which defines a validator. Use like this:
 
         @model
         class Foo:
@@ -119,7 +64,7 @@ def ModelPropertyWithHeader(model, **kwargs):
     validation logic and a default.
     """
 
-    all_attrs = [a.name for a in attr.fields(model)]
+    all_attrs = [a.name for a in fields(model)]
 
     def valid_property(self, attribute, value):
         if value is marshmallow.missing:
@@ -170,6 +115,7 @@ def ModelPropertyWithHeader(model, **kwargs):
         TODO: Support many properly. TODO: It might be nicer to just provide a custom field implementation here
         for fields.String, which automatically reject non-string types.
         """
+
         data = data.get(field.name)
 
         if data is None:
@@ -184,16 +130,13 @@ def ModelPropertyWithHeader(model, **kwargs):
 
         return result, []
 
-    return attr.ib(
+    return attrib(
         validator=valid_property,
         metadata={
             'marshal': custom_marshal(marshal=marshal, unmarshal=unmarshal)
         },
         **kwargs
     )
-
-
-model = lambda klass: marshallable(attr.s(auto_attribs=True, kw_only=True)(klass))
 
 
 #### Flatten headers
@@ -230,7 +173,7 @@ class HeaderFieldQuery:
     name: str
     form: Optional[HeaderFieldForm] = HeaderFieldForm.raw
     all: bool = False
-    original: str = attr.ib(cmp=False, default=None)
+    original: str = attrib(cmp=False, default=None)
 
     def __str__(self):
         if self.original:
@@ -295,7 +238,7 @@ def flatten_headers(data, instance, field):
     """
     Job: serialize `field` however desired for `instance`, add to `data` (which is already serialized).
     """
-    items = getattr(instance, field.name)
+    items = getattr(instance, field.name, None)
     if items:
         for item in items:
             data[f'header:{item.format_key()}'] = item.value
@@ -317,7 +260,7 @@ def unflatten_headers(data, field):
 
 
 def FlattenedHeaderQueries(**kwargs):
-    return attr.ib(
+    return attrib(
         metadata={
             'marshal': custom_marshal(marshal=flatten_headers, unmarshal=unflatten_headers)
         }
@@ -404,7 +347,7 @@ class StandardQueryArgs:
         if not '__annotations__' in cls.__dict__:
             cls.__annotations__ = {}
         cls.__annotations__['filter'] = Optional[filter]
-        cls.filter = attr.ib(default=attr.Factory(filter))
+        cls.filter = attrib(default=None)
         return cls
 
     account_id: str
@@ -548,7 +491,7 @@ class Email:
     blob_id: str
     thread_id: str
     mailbox_ids: Dict[str, bool]
-    keywords: Dict[str, bool] = attr.ib(default=attr.Factory(dict))
+    keywords: Dict[str, bool] = attrib(default=Factory(dict))
     size: int = PositiveInt()
     received_at: datetime
 
@@ -681,14 +624,14 @@ class ThreadChangesResponse(StandardChangesResponse):
 
 ###### Others
 
-@attr.s(auto_attribs=True, kw_only=True)
+@model
 class MethodCall:
     name: str
     args: Dict[str, Any]
     client_id: str
 
 
-@attr.s(auto_attribs=True, kw_only=True)
+@model
 class JMapRequest:
     using: List[str]
     method_calls: List[MethodCall]
@@ -726,7 +669,7 @@ def parse_methods(data):
     return methods
 
 
-@attr.s(auto_attribs=True, kw_only=True)
+@model
 class JMapResponse:
     method_responses: List[Any]
 
