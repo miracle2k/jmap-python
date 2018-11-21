@@ -1,3 +1,4 @@
+import datetime
 from marshmallow import fields
 from jmap.models import rfc3339
 
@@ -15,10 +16,9 @@ def serialize_rfc3339(date, localtime=True):
 
     is_utc = (date.utcoffset() is None) or (date.utcoffset() == rfc3339.ZERO)
 
+    # If this is a non-utc date and we are asked to render it in UTC, convert it
     if not localtime and not is_utc:
-        # We do not support this conversion for now, if you want to output
-        # UTC, you should give a UTC-datetime or a naive one.
-        raise ValueError(date)
+        date = date.astimezone(datetime.timezone.utc)
 
     # Remove the fractions
     date = date.replace(microsecond=0)
