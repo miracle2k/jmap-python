@@ -154,7 +154,7 @@ class HeaderFieldForm(enum.Enum):
     grouped_addresses = 'GroupedAddresses'
     message_ids = 'MessageIds'
     date = 'Date'
-    urls = 'Urls'
+    urls = 'URLs'
 
 
 field = make_marshmallow_field_from_python_type(HeaderFieldForm)

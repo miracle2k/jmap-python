@@ -251,7 +251,9 @@ class ImapProxyModule(EmailModule):
                 }
                 props_out[str(prop)] = getter(value, context)
 
-            found_list.append(Email.properties(**props_out))
+            if not 'id' in props_out:
+                props_out['id'] = make_message_id(message_id.folderpath, message_id.uidvalidity, message_id.uid)
+            found_list.append(Email.Properties(**props_out))
 
         return EmailGetResponse(
             account_id=args.account_id,
@@ -383,7 +385,8 @@ def make_email_state_string(uidnext, uidvalidity):
 def make_mailbox_id(folder_path, uidvalidity):
     """Generate a folder id, based on the folder name and the folder's UIDVALIDITY.
     """
-    data = json.dumps([folder_path, uidvalidity]).encode('utf-8')
+    # Do not use uidvalidity at this point
+    data = json.dumps([folder_path, '']).encode('utf-8')
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode('utf-8')
 
 
@@ -465,7 +468,11 @@ def decode_header(header_value: bytes, query: HeaderFieldQuery):
         DateHeader.parse(header_string, x)
         return x['datetime']
 
-    raise ValueError("Unsupported form: {}".format(query.form))
+    if query.form == HeaderFieldForm.urls:
+        # TODO: Complete
+        return header_string
+
+    raise ValueError("Allowed form, but unsupported by this server: {}".format(query.form))
 
 
 def rewrite_convenience_prop_to_header_query(prop):
@@ -517,7 +524,9 @@ def resolve_property(prop):
         return None, lambda s, c: 1
 
     if prop == 'mailbox_ids':
-        return None, lambda s, c: {}
+        return None, lambda s, c: {
+            make_mailbox_id(c['message_id'].folderpath, c['message_id'].uidvalidity): True
+        }
 
     if prop == 'keywords':
         return None, lambda s, c: {}
@@ -543,6 +552,9 @@ def resolve_property(prop):
     if prop == 'attachments':
         return None, lambda s, c: []
 
+    if prop == 'body_structure':
+        return None, lambda s, c: None
+
     if prop == 'thread_id':
         return None, lambda s, c: make_message_id(
             c['message_id'].folderpath, c['message_id'].uidvalidity, c['message_id'].uid)
@@ -554,7 +566,7 @@ def resolve_property(prop):
         prop_name = prop.name.lower()
         return (f'BODY.PEEK[HEADER.FIELDS ({prop_name.upper()})]', lambda x, c: decode_header(x, prop))
 
-    raise JMapInvalidArguments(f"Unknown property: {prop}")
+    raise JMapInvalidArguments(f"Valid property, but this server does not implement it: {prop}")
 
 
 def parse_message_ids(s):

@@ -6,12 +6,16 @@ from . import attrs
 from .marshal import marshallable
 
 
-def attrib(*, server_set=False, **kwargs):
+def attrib(*, server_set=False, camelcase=None, **kwargs):
     our_args = {}
     if server_set:
         metadata = our_args.setdefault('metadata', {})
         metadata['server_set'] = True
         our_args['init'] = False
+
+    if camelcase:
+        metadata = our_args.setdefault('metadata', {})
+        metadata['camelcase'] = camelcase
 
     return attrs.attrib(**kwargs, **our_args)
 

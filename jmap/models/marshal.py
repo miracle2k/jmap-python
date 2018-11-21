@@ -232,7 +232,7 @@ def make_marshmallow_field(attr_field) -> Optional[fields.Field]:
         field_args['validate'] = marshmallow_impl
 
     # Determine the key in JSON for this field.
-    data_key = to_camel_case(attr_field.name)
+    data_key = attr_field.metadata.get('camelcase', to_camel_case(attr_field.name))
 
     return field_type(
         data_key=data_key,
