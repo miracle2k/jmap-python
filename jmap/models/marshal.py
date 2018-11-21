@@ -52,6 +52,7 @@ import marshmallow
 from marshmallow import ValidationError, post_load, fields, post_dump, Schema
 
 from jmap.models.attrs import NOTHING, fields as get_fields, attrs, attrib
+from jmap.models.fields import JmapDateTime
 from jmap.models.utils import get_set_attrs
 
 
@@ -67,7 +68,7 @@ TYPE_MAPPING = {
     float: fields.Float,
     bool: fields.Boolean,
     int: fields.Integer,
-    datetime: fields.DateTime
+    datetime: JmapDateTime,
 }
 
 
