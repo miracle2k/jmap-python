@@ -105,9 +105,9 @@ import time
 from email.headerregistry import AddressHeader, DateHeader
 import email.header
 from imaplib import IMAP4
-from typing import Tuple
-import attr
+from typing import Tuple, List, Dict
 
+from jmap.models.attrs import attrs, attrib
 from jmap.protocol.errors import JMapInvalidArguments, JMapUnsupportedFilter, JmapCannotCalculateChanges
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, EmailQueryArgs, EmailQueryResponse, \
@@ -126,24 +126,26 @@ class ImapProxyModule(EmailModule):
         print(self.client.capabilities())
 
     def handle_mailbox_get(self, context, args: MailboxGetArgs):
-        # Get all Folders
+        # Get all folders
         # TODO: We could possibly only query the ids given
         folders = self.client.list_folders()
-        folders = folders_with_parents(folders)
+        folders = parse_imap_mailboxes(folders)
+        add_implicit_parent_folders(folders)
 
         mailboxes = []
-        for (flags, separator, parent, fullname, basename) in folders:
-            mbox_id = make_mailbox_id(fullname, '')
-
-            if args.ids and not mbox_id in args.ids:
+        for folder in folders.values():
+            jmap_id = folder.jmap_id
+            if args.ids and not jmap_id in args.ids:
                 continue
 
             # TODO: Return only the queried properties!
+            # TODO: Should there be a Mailbox.Server constructor?
             mailboxes.append(Mailbox(
-                id=mbox_id,
-                name=basename,
-                parent_id=make_mailbox_id(parent, ''),
-                role=None
+                id=jmap_id,
+                name=folder.name,
+                parent_id=folder.jmap_parent_id,
+                role=None,
+                is_subscribed=True
             ))
 
         return MailboxGetResponse(
@@ -158,7 +160,7 @@ class ImapProxyModule(EmailModule):
         # TODO: Rather than handling all filter conditions in Python, we should move them
         # to the query itself where possible (say the parent_id).
         folders = self.client.list_folders()
-        folders = folders_with_parents(folders)
+        folders = parse_imap_mailboxes(folders)
 
         filtered = folders
         if args.filter:
@@ -409,7 +411,7 @@ def make_message_id(folder_path, uidvalidity, message_uid):
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode('utf-8')
 
 
-@attr.s(auto_attribs=True)
+@attrs(auto_attribs=True, slots=True)
 class ImapMesageId:
     folderpath: str
     uidvalidity: str
@@ -586,19 +588,58 @@ def parse_message_ids(s):
     return result
 
 
-def folders_with_parents(folders: Tuple):
-    """
-    Given a folder 3-tuple from imaplib, add parent paths.
-    """
+@attrs(auto_attribs=True, slots=True)
+class ImapMailbox:
+    flags: Tuple[str] = []
+    seperator: str
+    parent_path: str
+    full_path: str
+    name: str
+    virtual: str = attrib(default=False)
 
-    with_parent = []
-    for flags, sep, name in folders:
+    @classmethod
+    def from_tuple(self, imap_tuple):
+        flags, sep, name = imap_tuple
         parts = name.rsplit(sep.decode('utf-8'), 1)
         if len(parts) == 1:
             parent = ''
             base = parts[0]
         else:
             parent, base = parts
-        with_parent.append((flags, sep, parent, name, base))
 
-    return with_parent
+        return ImapMailbox(
+            flags=flags,
+            seperator=sep,
+            parent_path=parent,
+            full_path=name,
+            name=base
+        )
+
+    @property
+    def jmap_id(self):
+        return make_mailbox_id(self.full_path, "")
+
+    @property
+    def jmap_parent_id(self):
+        return make_mailbox_id(self.parent_path, "")
+
+
+
+def parse_imap_mailboxes(folders: Tuple) -> Dict[str, ImapMailbox]:
+    """
+    Given a folder 3-tuple from imaplib, returns `Folder` instances.
+    """
+
+    result = {}
+    for folder_tuple in folders:
+        box = ImapMailbox.from_tuple(folder_tuple)
+        result[box.jmap_id] = box
+    return result
+
+
+def add_implicit_parent_folders(mailboxes: Dict[str, ImapMailbox]):
+    for box in list(mailboxes.values()):
+        # There is an implicit parent here, add it
+        if not box.jmap_parent_id in mailboxes:
+            box = ImapMailbox.from_tuple(([], box.seperator, box.parent_path))
+            mailboxes[box.id] = box
