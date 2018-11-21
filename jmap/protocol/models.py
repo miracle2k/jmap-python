@@ -33,7 +33,7 @@ CALENDARS_URN = 'urn:ietf:params:jmap:calendar'
 CONTACTS_URN = 'urn:ietf:params:jmap:contacts'
 
 
-def PositiveInt(default=None):
+def PositiveInt(default=None, **kwargs):
     """The PositiveInt type specified by JMAP.
 
     This is a `attrib` which defines a validator. Use like this:
@@ -48,10 +48,10 @@ def PositiveInt(default=None):
     def larger_than_0(self, attribute, value):
         if value is not None and value is not Missing and value < 0:
             raise ValueError(f'{self.__class__.__name__}.{attribute.name} is a PositiveInt and must be >0, but was given: {value}')
-    return attrib(validator=larger_than_0, default=default)
+    return attrib(validator=larger_than_0, default=default, **kwargs)
 
 
-def ModelPropertyWithHeader(model, **kwargs):
+def ModelPropertyWithHeader(model, with_headers=False, **kwargs):
     """A string type that is restricted to one of the property names of `model`.
 
     This is a `attrib` which defines a validator. Use like this:
@@ -75,16 +75,17 @@ def ModelPropertyWithHeader(model, **kwargs):
             if item in all_attrs:
                 continue
 
-            if isinstance(item, HeaderFieldQuery):
+            if isinstance(item, HeaderFieldQuery) and with_headers:
                 continue
 
             # Can we parse it has a HeaderFieldQuery?
-            try:
-                HeaderFieldQuery.unmarshal(item)
-            except ValidationError:
-                pass
-            else:
-                continue
+            if with_headers:
+                try:
+                    HeaderFieldQuery.unmarshal(item)
+                except ValidationError:
+                    pass
+                else:
+                    continue
 
             raise ValueError(f'{self.__class__.__name__}.{attribute.name} was given "{item}", which is not an allowed value: {all_attrs}')
 
@@ -98,7 +99,7 @@ def ModelPropertyWithHeader(model, **kwargs):
 
         result = []
         for item in props:
-            if isinstance(item, HeaderFieldQuery):
+            if isinstance(item, HeaderFieldQuery) and with_headers:
                 result.append(str(item))
             else:
                 result.append(to_camel_case(item))
@@ -123,7 +124,7 @@ def ModelPropertyWithHeader(model, **kwargs):
 
         result = []
         for item in data:
-            if HeaderFieldQuery.will_handle(item):
+            if with_headers and HeaderFieldQuery.will_handle(item):
                 result.append(HeaderFieldQuery.unmarshal(item))
             else:
                 result.append(snakecase(item))
@@ -279,12 +280,32 @@ class Comparator:
 
 
 @model
+class MailboxRights:
+    may_read_items: bool
+    may_add_items: bool
+    may_remove_items: bool
+    may_set_seen: bool
+    may_set_keywords: bool
+    may_create_child: bool
+    may_rename: bool
+    may_delete: bool
+    may_submit: bool
+
+
+@model
 class Mailbox:
     id: str
     name: str
     parent_id: Optional[str] = None
     role: Optional[str]
     sort_order: int = PositiveInt(default=0)
+
+    total_emails: int = PositiveInt(server_set=True)
+    unread_emails: int = PositiveInt(server_set=True)
+    total_threads: int = PositiveInt(server_set=True)
+    unread_threads: int = PositiveInt(server_set=True)
+    my_rights: MailboxRights = attrib(server_set=True)
+    is_subscribed: bool
 
 
 @model
@@ -315,8 +336,18 @@ class StandardGetArgs:
     account_id: str
     ids: Optional[List[str]] = None
 
-    # Properties
-    # properties: Optional[List[str]] = None
+    def __init_subclass__(cls, *, type, default_props, with_headers=False):
+        if not '__annotations__' in cls.__dict__:
+            cls.__annotations__ = {}
+
+
+        if with_headers:
+            cls.__annotations__['properties'] = Optional[List[Union[str, HeaderFieldQuery]]]
+            cls.properties = ModelPropertyWithHeader(type, default=default_props, with_headers=True)
+        else:
+            cls.__annotations__['properties'] = Optional[List[str]]
+            cls.properties = ModelPropertyWithHeader(type, default=default_props, with_headers=False)
+        return cls
 
 
 @model
@@ -395,11 +426,70 @@ class StandardQueryResponse:
     ids: List[str]
 
 
+PatchObject = Dict[str, Any]
+
+
+@model
+class StandardSetArgs:
+    """
+    "5.3 /set" (https://jmap.io/spec-core.html#/set)
+    """
+    account_id: str
+    if_in_state: Optional[str] = None
+    destroy: Optional[List[str]] = None
+
+    def __init_subclass__(cls, *, type):
+        if not '__annotations__' in cls.__dict__:
+            cls.__annotations__ = {}
+
+        cls.__annotations__['create'] = Optional[Dict[str, type]]
+        cls.create = None
+
+        cls.__annotations__['update'] = Optional[Dict[str, PatchObject]]
+        cls.update = None
+
+        return cls
+
+
+@model
+class SetError:
+    type: str
+    description: Optional[str]
+
+
+@model
+class StandardSetResponse:
+    """
+    "5.3 /set" (https://jmap.io/spec-core.html#/set)
+    """
+    account_id: str
+    old_state: Optional[str] = None
+    new_state: str
+
+    destroyed: Optional[List[str]] = None
+    not_created: Optional[Dict[str, SetError]] = None
+    not_updated: Optional[Dict[str, SetError]] = None
+    not_destroyed: Optional[Dict[str, SetError]] = None
+
+    def __init_subclass__(cls, *, type):
+        if not '__annotations__' in cls.__dict__:
+            cls.__annotations__ = {}
+
+        cls.__annotations__['created'] = Optional[Dict[str, type]]
+        cls.created = None
+
+        cls.__annotations__['updated'] = Optional[Dict[str, type]]
+        cls.updated = None
+
+        return cls
+
+
+
 ####### Mailbox/get
 
 
 @model
-class MailboxGetArgs(StandardGetArgs):
+class MailboxGetArgs(StandardGetArgs, type=Mailbox, default_props=[]):
     pass
 
 
@@ -552,13 +642,10 @@ DEFAULT_EMAIL_GET_PROPERTIES = list(map(lambda x: safe(snakecase(x)), [
 
 
 @model
-class EmailGetArgs(StandardGetArgs):
-    properties: Optional[List[Union[str, HeaderFieldQuery]]] = \
-        ModelPropertyWithHeader(Email, default=DEFAULT_EMAIL_GET_PROPERTIES)
-
+class EmailGetArgs(StandardGetArgs, type=Email, default_props=DEFAULT_EMAIL_GET_PROPERTIES, with_headers=True):
     body_properties: Optional[List[str]] = None
     fetch_text_body_values: bool = False
-    fetch_html_body_values: bool = False
+    fetch_html_body_values: bool = attrib(default=False, camelcase='fetchHTMLBodyValues')
     fetch_all_body_values: bool = False
     max_body_value_bytes: int = PositiveInt(default=0)
 
@@ -596,11 +683,28 @@ class EmailQueryResponse(StandardQueryResponse):
     collapse_threads: bool
 
 
+###### Email/set
+
+
+@model
+class EmailSetArgs(StandardSetArgs, type=Email):
+    """
+    "4.6 Email/set" (https://jmap.io/spec-mail.html#email/set)
+    """
+
+
+@model
+class EmailSetResponse(StandardSetResponse, type=Email):
+    """
+    "4.6 Email/set" (https://jmap.io/spec-mail.html#email/set)
+    """
+
+
 ###### Thread/get
 
 
 @model
-class ThreadGetArgs(StandardGetArgs):
+class ThreadGetArgs(StandardGetArgs, type=Thread, default_props=[]):
     pass
 
 

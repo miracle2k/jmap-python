@@ -113,7 +113,7 @@ from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, EmailQueryArgs, EmailQueryResponse, \
     EmailGetResponse, EmailGetArgs, HeaderFieldQuery, HeaderFieldForm, EmailAddress, MailboxQueryArgs, \
     MailboxQueryResponse, Mailbox, MailboxChangesArgs, MailboxChangesResponse, Email, ThreadGetArgs, \
-    ThreadGetResponse, ThreadChangesArgs, ThreadChangesResponse, Thread
+    ThreadGetResponse, ThreadChangesArgs, ThreadChangesResponse, Thread, EmailSetArgs, EmailSetResponse
 from imapclient import IMAPClient
 
 
@@ -329,6 +329,13 @@ class ImapProxyModule(EmailModule):
         """
         # we might be able to return changes, but only if the filter is a single mailbox
         """
+
+    def handle_email_set(self, context, args: EmailSetArgs) -> EmailSetResponse:
+        print(args)
+        return EmailSetResponse(
+            account_id=args.account_id,
+            new_state='test'
+        )
 
     def handle_thread_get(self, context, args: ThreadGetArgs) -> ThreadGetResponse:
         """
