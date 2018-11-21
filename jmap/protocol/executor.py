@@ -7,8 +7,9 @@ from typing import List, Dict, Any
 
 from marshmallow import ValidationError
 
-from jmap.protocol.core import JmapModuleInterface, JMapError, JMapMethodError, JMapNotRequest, \
-    JMapInvalidResultReference, JMapUnknownMethod
+from jmap.protocol.core import JmapModuleInterface
+from jmap.protocol.errors import JMapError, JMapMethodError, JMapUnknownMethod, JMapInvalidResultReference, \
+    JMapNotRequest
 from jmap.protocol.jsonpointer import resolve_pointer, JsonPointerException
 from jmap.protocol.models import JMapRequest, JMapResponse, ResultReference
 

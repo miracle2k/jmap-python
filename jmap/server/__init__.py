@@ -13,7 +13,8 @@ from flask.json import JSONEncoder
 from flask_cors import CORS, cross_origin
 
 from jmap.protocol.models import JMapRequest, Account, MAIL_URN
-from jmap.protocol.core import CoreModule, JMapRequestError, JMapError
+from jmap.protocol.core import CoreModule
+from jmap.protocol.errors import JMapError, JMapRequestError
 from jmap.protocol.fallback import FallbackModule
 from jmap.protocol.executor import Executor
 from jmap.server.accounts import StaticBackend

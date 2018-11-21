@@ -108,7 +108,7 @@ from imaplib import IMAP4
 from typing import Tuple
 import attr
 
-from jmap.protocol.core import JMapUnsupportedFilter, JmapCannotCalculateChanges, JMapInvalidArguments
+from jmap.protocol.errors import JMapInvalidArguments, JMapUnsupportedFilter, JmapCannotCalculateChanges
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, EmailQueryArgs, EmailQueryResponse, \
     EmailGetResponse, EmailGetArgs, HeaderFieldQuery, HeaderFieldForm, EmailAddress, MailboxQueryArgs, \

@@ -1,6 +1,6 @@
 import pytest
 
-from jmap.protocol.core import JMapInvalidArguments
+from jmap.protocol.errors import JMapInvalidArguments
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs
 from jmap.server.accounts import StaticBackend
