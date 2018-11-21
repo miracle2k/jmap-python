@@ -233,8 +233,6 @@ def make_marshmallow_field(attr_field) -> Optional[fields.Field]:
 
     # Determine the key in JSON for this field.
     data_key = to_camel_case(attr_field.name)
-    if data_key.endswith('_'):  # To support "from_"
-        data_key = data_key[:-1]
 
     return field_type(
         data_key=data_key,
@@ -348,14 +346,22 @@ def to_camel_case(snake_str):
     components = snake_str.split('_')
     # We capitalize the first letter of each component except the first one
     # with the 'title' method and join them together.
-    return components[0] + ''.join(x.title() for x in components[1:])
+    result = components[0] + ''.join(x.title() for x in components[1:])
+
+    if result.endswith('_'):  # To support "from_"
+        result = result[:-1]
+    return result
 
 
 def snakecase(string):
     string = re.sub(r"[\-\.\s]", '_', str(string))
     if not string:
         return string
-    return string[0].lower() + re.sub(r"[A-Z]", lambda matched: '_' + matched.group(0).lower(), string[1:])
+    result = string[0].lower() + re.sub(r"[A-Z]", lambda matched: '_' + matched.group(0).lower(), string[1:])
+
+    if result in ('from',):
+        result = result + '_'
+    return result
 
 
 class CustomNested(fields.Nested):

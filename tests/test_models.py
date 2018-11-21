@@ -68,6 +68,13 @@ def test_header_values_in_properties():
         ))
 
 
+def test_from_property():
+    EmailGetArgs.from_client({
+        'accountId': '1',
+        'properties': [ 'from']
+    })
+
+
 def test_email_header():
     # This is testing we can use the header:** property when parsing an email
     em = Email(
