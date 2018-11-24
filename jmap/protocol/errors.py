@@ -70,3 +70,11 @@ class JMapNotRequest(JMapRequestError):
     typename = 'notRequest'
     statuscode = 400
     detail = 'This was not a valid request structure'
+
+
+class SetError(Exception):
+    pass
+
+
+class SetErrorNotFound(SetError):
+    pass

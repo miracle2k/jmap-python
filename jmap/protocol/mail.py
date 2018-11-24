@@ -13,7 +13,8 @@ import types
 from jmap.protocol.core import JmapBaseModule
 from jmap.protocol.models import MailboxGetArgs, EmailQueryArgs, EmailQueryResponse, EmailGetResponse, EmailGetArgs, \
     ThreadGetArgs, ThreadGetResponse, MailboxQueryArgs, MailboxQueryResponse, MailboxChangesArgs, \
-    MailboxChangesResponse, ThreadChangesArgs, ThreadChangesResponse, EmailSetResponse, EmailSetArgs
+    MailboxChangesResponse, ThreadChangesArgs, ThreadChangesResponse, EmailSetResponse, EmailSetArgs, MailboxSetArgs, \
+    MailboxSetResponse
 
 
 def check_get_perms(instance, auth_backend, typename, handler):
@@ -40,6 +41,7 @@ class EmailModule(JmapBaseModule):
             'Mailbox/get': check_get_perms(self, auth_backend, 'Mailbox', self.handle_mailbox_get),
             'Mailbox/changes': self.handle_mailbox_changes,
             'Mailbox/query': self.handle_mailbox_query,
+            'Mailbox/set': self.handle_mailbox_set,
             'Email/get': self.handle_email_get,
             'Email/query': self.handle_email_query,
             'Email/set': self.handle_email_set,
@@ -54,6 +56,9 @@ class EmailModule(JmapBaseModule):
         raise NotImplementedError()
 
     def handle_mailbox_changes(self, context, args: MailboxChangesArgs) -> MailboxChangesResponse:
+        raise NotImplementedError()
+
+    def handle_email_set(self, context, args: MailboxSetArgs) -> MailboxSetResponse:
         raise NotImplementedError()
 
     def handle_email_get(self, context, args: EmailGetArgs) -> EmailGetResponse:

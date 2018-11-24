@@ -272,6 +272,19 @@ def FlattenedHeaderQueries(**kwargs):
 ###### Base models
 
 
+class MailboxRole(enum.Enum):
+    # https://www.iana.org/assignments/imap-mailbox-name-attributes/imap-mailbox-name-attributes.xhtml
+    # As JMAP dictates, converted to lowercase.
+    All = 'all'
+    Archive = 'archive'
+    Drafts = 'drafts'
+    Flagged = 'flagged'
+    Important = 'flagged'
+    Junk = 'flagged'
+    Sent = 'sent'
+    Trash = 'trash'
+
+
 @model
 class Comparator:
     property: str
@@ -294,10 +307,10 @@ class MailboxRights:
 
 @model
 class Mailbox:
-    id: str
+    id: str = attrib(server_set=True)
     name: str
     parent_id: Optional[str] = None
-    role: Optional[str]
+    role: Optional[str] = None
     sort_order: int = PositiveInt(default=0)
 
     total_emails: int = PositiveInt(server_set=True)
@@ -422,7 +435,7 @@ class StandardQueryResponse:
     query_state: str
     can_calculate_changes: bool
     position: int = PositiveInt()
-    total: Optional[int] = PositiveInt(default=Missing)
+    total: Optional[int] = PositiveInt()
     ids: List[str]
 
 
@@ -530,6 +543,25 @@ class MailboxQueryArgs(StandardQueryArgs, filter=MailboxQueryFilterCondition):
 @model
 class MailboxQueryResponse(StandardQueryResponse):
     pass
+
+
+###### Mailbox/set
+
+
+@model
+class MailboxSetArgs(StandardSetArgs, type=Mailbox):
+    """
+    "2.5 Mailbox/set" (https://jmap.io/spec-mail.html#mailbox/set)
+    """
+
+    on_destroy_remove_messages: bool = False
+
+
+@model
+class MailboxSetResponse(StandardSetResponse, type=Mailbox):
+    """
+    "2.5 Mailbox/set" (https://jmap.io/spec-mail.html#mailbox/set)
+    """
 
 
 ####### Email

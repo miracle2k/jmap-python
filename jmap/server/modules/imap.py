@@ -102,28 +102,62 @@ has some prior art regarding connection pools, for example.
 import base64
 import json
 import time
-from email.headerregistry import AddressHeader, DateHeader
-import email.header
 from imaplib import IMAP4
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 
-from jmap.models.attrs import attrs, attrib
-from jmap.protocol.errors import JMapInvalidArguments, JMapUnsupportedFilter, JmapCannotCalculateChanges
+from imapclient.exceptions import CapabilityError
+
+from jmap.protocol.errors import JMapInvalidArguments, JMapUnsupportedFilter, JmapCannotCalculateChanges, \
+    SetErrorNotFound
 from jmap.protocol.mail import EmailModule
 from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, EmailQueryArgs, EmailQueryResponse, \
-    EmailGetResponse, EmailGetArgs, HeaderFieldQuery, HeaderFieldForm, EmailAddress, MailboxQueryArgs, \
+    EmailGetResponse, EmailGetArgs, MailboxQueryArgs, \
     MailboxQueryResponse, Mailbox, MailboxChangesArgs, MailboxChangesResponse, Email, ThreadGetArgs, \
-    ThreadGetResponse, ThreadChangesArgs, ThreadChangesResponse, Thread, EmailSetArgs, EmailSetResponse
+    ThreadGetResponse, ThreadChangesArgs, ThreadChangesResponse, Thread, EmailSetArgs, EmailSetResponse, \
+    MailboxSetResponse, MailboxSetArgs
 from imapclient import IMAPClient
+
+from jmap.server.modules.models import make_mailbox_id, decode_mailbox_id, safe_decode_mailbox_id, make_message_id, \
+    decode_message_id, ImapMailbox, MailboxDataType, MailboxData
+from jmap.server.modules.properties import resolve_email_property, resolve_mailbox_property
+
+
+class ImapCachePolicy:
+    def get_request_resolver_cache(self, account_id: str, client: IMAPClient):
+        # Return a new one every time
+        return ImapCache(client)
+
+
+class ImapCache:
+    def __init__(self, client: IMAPClient):
+        self.client = client
+        self.cache = {}
+
+    def fetch_mailbox_info(self, mailbox: ImapMailbox, what: Optional[MailboxDataType]) -> Optional[MailboxData]:
+        if not what:
+            return None
+
+        acls = folder = None
+
+        if MailboxDataType.needs_acl in what:
+            try:
+                acls = self.client.getacl()
+            except CapabilityError:
+                acls = False
+
+        if MailboxDataType.needs_open in what:
+            folder = self.client.select_folder(mailbox.full_path, readonly=True)
+
+        return MailboxData(acls=acls, folder=folder)
 
 
 class ImapProxyModule(EmailModule):
 
-    def __init__(self, host, username, password):
+    def __init__(self, host, username, password, port=None, ssl=True):
         super().__init__()
-        self.client =  IMAPClient(host=host)
+        self.client =  IMAPClient(host=host, port=port, ssl=ssl)
         self.client.login(username, password)
-        print(self.client.capabilities())
+        self.cache_policy = ImapCachePolicy()
 
     def handle_mailbox_get(self, context, args: MailboxGetArgs):
         # Get all folders
@@ -132,21 +166,21 @@ class ImapProxyModule(EmailModule):
         folders = parse_imap_mailboxes(folders)
         add_implicit_parent_folders(folders)
 
+        cache = self.cache_policy.get_request_resolver_cache(args.account_id, self.client)
+
         mailboxes = []
-        for folder in folders.values():
-            jmap_id = folder.jmap_id
+        for mailbox in folders.values():
+            jmap_id = mailbox.jmap_id
             if args.ids and not jmap_id in args.ids:
                 continue
 
-            # TODO: Return only the queried properties!
-            # TODO: Should there be a Mailbox.Server constructor?
-            mailboxes.append(Mailbox(
-                id=jmap_id,
-                name=folder.name,
-                parent_id=folder.jmap_parent_id,
-                role=None,
-                is_subscribed=True
-            ))
+            collected = {}
+            for prop in args.properties:
+                needed, func = resolve_mailbox_property(prop)
+                info = cache.fetch_mailbox_info(mailbox, needed)
+                collected[prop] = func(mailbox, info)
+
+            mailboxes.append(Mailbox.Properties(**collected))
 
         return MailboxGetResponse(
             account_id=args.account_id,
@@ -159,6 +193,8 @@ class ImapProxyModule(EmailModule):
         # Query all folders
         # TODO: Rather than handling all filter conditions in Python, we should move them
         # to the query itself where possible (say the parent_id).
+
+        # TODO: if they ask for subscribed - we have to query only those...
         folders = self.client.list_folders()
         folders = parse_imap_mailboxes(folders)
 
@@ -196,8 +232,55 @@ class ImapProxyModule(EmailModule):
             ids=[make_mailbox_id(folder[3], '') for folder in filtered],
         )
 
-    def handle_mailbox_set(self, context, args: MailboxGetArgs):
-        raise JMapUnsupportedFilter()
+    def handle_mailbox_set(self, context, args: MailboxSetArgs) -> MailboxSetResponse:
+        # Handle all create instructions
+        created = {}
+        if args.create:
+            for create_id, object in args.create.items():
+                partial_mailbox: Mailbox = object
+
+                if partial_mailbox.parent_id:
+                    parent_folder_path, _ = decode_mailbox_id(partial_mailbox.parent_id)
+                    new_folder_path = f'{parent_folder_path}.{partial_mailbox.name}'
+                else:
+                    parent_folder_path = None
+                    new_folder_path = f'{partial_mailbox.name}'
+                self.client.create_folder(new_folder_path)
+
+                imap_folder = ImapMailbox(
+                    flags=None, parent_path=parent_folder_path, full_path=new_folder_path,
+                    separator=".", name=partial_mailbox.name
+                )
+
+                created[create_id] = imap_folder.to_jmap_mailbox()
+
+        # Handle all update instructions
+        updated = {}
+        if args.update:
+            for item_id, object in args.update.items():
+                pass
+
+        # Handle all destroy instructions
+        destroyed = []
+        not_destroyed = {}
+        if args.destroy:
+            for id_to_destroy in args.destroy:
+                folder_path = safe_decode_mailbox_id(id_to_destroy)
+                if not folder_path:
+                    not_destroyed[id_to_destroy] = SetErrorNotFound()
+                else:
+                    # TODO: args.on_destroy_remove_messages
+                    self.client.delete_folder(folder_path)
+                    destroyed.append(id_to_destroy)
+
+        return MailboxSetResponse(
+            account_id=args.account_id,
+            new_state='test',
+            created=created,
+            destroyed=destroyed,
+            not_destroyed=not_destroyed
+        )
+
 
     def handle_mailbox_changes(self, context, args: MailboxChangesArgs) -> MailboxChangesResponse:
         """
@@ -224,19 +307,19 @@ class ImapProxyModule(EmailModule):
         # directly to an IMAP fetch field, others we can generate locally.
         imap_fields = set()
         for prop in args.properties:
-            imap_field, _ = resolve_property(prop)
+            imap_field, _ = resolve_email_property(prop)
             if imap_field:
                 imap_fields.add(imap_field)
 
         found_list = []
-        for mesage_id in message_ids:
-            self.client.select_folder(mesage_id.folderpath)
+        for message_id in message_ids:
+            self.client.select_folder(message_id.folderpath)
             # TODO: validate uidvalidity
 
             # Query IMAP
             if imap_fields:
-                response = self.client.fetch([mesage_id.uid], imap_fields)
-                msg = response[mesage_id.uid]
+                response = self.client.fetch([message_id.uid], imap_fields)
+                msg = response[message_id.uid]
                 print(msg)
             else:
                 msg = {}
@@ -244,12 +327,12 @@ class ImapProxyModule(EmailModule):
             # now generate the props
             props_out = {}
             for prop in args.properties:
-                imap_field, getter = resolve_property(prop)
+                imap_field, getter = resolve_email_property(prop)
                 fimap_field = imap_field.replace('.PEEK', '').encode('utf-8') if imap_field else None
                 value = msg[fimap_field] if fimap_field else None
 
                 context = {
-                    'message_id': mesage_id
+                    'message_id': message_id,
                 }
                 props_out[str(prop)] = getter(value, context)
 
@@ -384,247 +467,6 @@ def make_email_state_string(uidnext, uidvalidity):
     return base64.urlsafe_b64encode(data).rstrip(b"=")
 
 
-def make_mailbox_id(folder_path, uidvalidity):
-    """Generate a folder id, based on the folder name and the folder's UIDVALIDITY.
-    """
-    # Do not use uidvalidity at this point
-    data = json.dumps([folder_path, '']).encode('utf-8')
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode('utf-8')
-
-
-def decode_mailbox_id(mailbox_id: str) -> Tuple[str, str]:
-    """Raises a ValueError if the id is not properly encoded.
-
-    I suggest the caller treats this error as an id that was not found.
-    """
-    mailbox_id += "=" * (-len(mailbox_id) % 4)
-
-    data = json.loads(base64.urlsafe_b64decode(mailbox_id))
-    return data[0], data[1]
-
-
-def make_message_id(folder_path, uidvalidity, message_uid):
-    """Generate a message id, based on the folder name, the folder's UIDVALIDITY
-    and the message id.
-    """
-    data = json.dumps([folder_path, uidvalidity, message_uid]).encode('utf-8')
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode('utf-8')
-
-
-@attrs(auto_attribs=True, slots=True)
-class ImapMesageId:
-    folderpath: str
-    uidvalidity: str
-    uid: str
-
-
-def decode_message_id(message_id: str) -> ImapMesageId:
-    """Raises a ValueError if the id is not properly encoded.
-
-    I suggest the caller treats this error as an id that was not found.
-    """
-    message_id += "=" * (-len(message_id) % 4)
-
-    data = json.loads(base64.urlsafe_b64decode(message_id))
-    return ImapMesageId(folderpath=data[0], uidvalidity=data[1], uid=data[2])
-
-
-def decode_header(header_value: bytes, query: HeaderFieldQuery):
-    """
-    Decode the email header, and return in the requested form.
-    """
-
-    # Decode the bytes
-    header_string = header_value.decode('utf-8')
-
-    # Is the header empty?
-    if not header_string.strip():
-        header_string = ""
-    else:
-        # Cut off the header name
-        header_string = header_string[header_string.index(':')+1:].lstrip()
-        # Cut off the trailing CLRF
-        header_string = header_string.rstrip('\r\n')
-
-    if query.form == HeaderFieldForm.raw:
-        return header_string
-
-    if query.form == HeaderFieldForm.text:
-        header = email.header.make_header(email.header.decode_header(header_string))
-        return str(header)
-
-    if query.form == HeaderFieldForm.addresses:
-        # TODO: Validate headers where this form is disallowed by the spec.
-        x = {}
-        AddressHeader.parse(header_string, x)
-        return [
-            EmailAddress(email=f'{address.username}@{address.domain}', name=address.display_name)
-            for group in x['groups'] for address in group.addresses
-        ]
-
-    if query.form == HeaderFieldForm.message_ids:
-        return parse_message_ids(header_string)
-
-    if query.form == HeaderFieldForm.date:
-        x = {}
-        DateHeader.parse(header_string, x)
-        return x['datetime']
-
-    if query.form == HeaderFieldForm.urls:
-        # TODO: Complete
-        return header_string
-
-    raise ValueError("Allowed form, but unsupported by this server: {}".format(query.form))
-
-
-def rewrite_convenience_prop_to_header_query(prop):
-    """
-    Rewrite the given property to a header query, as detailed in:
-
-    https://jmap.io/spec-mail.html#properties-of-the-email-object
-
-    If this is not one of the known convenience properties, return it unchanged.
-    """
-    if prop == 'message_id':
-        return HeaderFieldQuery(name='message-id', form=HeaderFieldForm.message_ids)
-    if prop == 'in_reply_to':
-        return HeaderFieldQuery(name='in-reply-to', form=HeaderFieldForm.message_ids)
-    if prop == 'references':
-        return HeaderFieldQuery(name='references', form=HeaderFieldForm.message_ids)
-    if prop == 'sender':
-        return HeaderFieldQuery(name='sender', form=HeaderFieldForm.addresses)
-    if prop == 'from_':
-        return HeaderFieldQuery(name='from', form=HeaderFieldForm.addresses)
-    if prop == 'to':
-        return HeaderFieldQuery(name='to', form=HeaderFieldForm.addresses)
-    if prop == 'cc':
-        return HeaderFieldQuery(name='cc', form=HeaderFieldForm.addresses)
-    if prop == 'bcc':
-        return HeaderFieldQuery(name='bcc', form=HeaderFieldForm.addresses)
-    if prop == 'reply_to':
-        return HeaderFieldQuery(name='reply-to', form=HeaderFieldForm.addresses)
-    if prop == 'subject':
-        return HeaderFieldQuery(name='subject', form=HeaderFieldForm.text)
-    if prop == 'sent_at':
-        return HeaderFieldQuery(name='date', form=HeaderFieldForm.date)
-
-    return prop
-
-
-def resolve_property(prop):
-    """
-    Returns a 2-tuple: The imap property that we need to query to resolve
-    this property, if any, and a "generator", that creates the value.
-    """
-
-    prop = rewrite_convenience_prop_to_header_query(prop)
-
-    if prop == 'id':
-        return None, lambda s, c: 1
-
-    if prop == 'blob_id':
-        return None, lambda s, c: 1
-
-    if prop == 'mailbox_ids':
-        return None, lambda s, c: {
-            make_mailbox_id(c['message_id'].folderpath, c['message_id'].uidvalidity): True
-        }
-
-    if prop == 'keywords':
-        return None, lambda s, c: {}
-
-    if prop == 'received_at':
-        return None, lambda s, c: None # XXX
-
-    if prop == 'has_attachment':
-        return None, lambda s, c: False
-
-    if prop == 'preview':
-        return None, lambda s, c: 'foo'
-
-    if prop == 'body_values':
-        return None, lambda s, c: {}
-
-    if prop == 'text_body':
-        return None, lambda s, c: ''
-
-    if prop == 'html_body':
-        return None, lambda s, c: ''
-
-    if prop == 'attachments':
-        return None, lambda s, c: []
-
-    if prop == 'body_structure':
-        return None, lambda s, c: None
-
-    if prop == 'thread_id':
-        return None, lambda s, c: make_message_id(
-            c['message_id'].folderpath, c['message_id'].uidvalidity, c['message_id'].uid)
-
-    if prop == 'size':
-        return ('RFC822.SIZE', lambda s, c: s)  # XXX: is that the right size value?
-
-    if isinstance(prop, HeaderFieldQuery):
-        prop_name = prop.name.lower()
-        return (f'BODY.PEEK[HEADER.FIELDS ({prop_name.upper()})]', lambda x, c: decode_header(x, prop))
-
-    raise JMapInvalidArguments(f"Valid property, but this server does not implement it: {prop}")
-
-
-def parse_message_ids(s):
-    """
-    It seems there is nothing in Python that does this, nor could I find could
-    in the wild, so we have to do this ourselves.
-    """
-
-    parts = [p for p in [part.strip() for part in s.strip().split(' ')] if p]
-
-    result = []
-    for part in parts:
-        if not part[0] == '<' and part[-1] == '<':
-            return None  # parsing failed
-        result.append(part[1:-1])
-
-    return result
-
-
-@attrs(auto_attribs=True, slots=True)
-class ImapMailbox:
-    flags: Tuple[str] = []
-    seperator: str
-    parent_path: str
-    full_path: str
-    name: str
-    virtual: str = attrib(default=False)
-
-    @classmethod
-    def from_tuple(self, imap_tuple):
-        flags, sep, name = imap_tuple
-        parts = name.rsplit(sep.decode('utf-8'), 1)
-        if len(parts) == 1:
-            parent = ''
-            base = parts[0]
-        else:
-            parent, base = parts
-
-        return ImapMailbox(
-            flags=flags,
-            seperator=sep,
-            parent_path=parent,
-            full_path=name,
-            name=base
-        )
-
-    @property
-    def jmap_id(self):
-        return make_mailbox_id(self.full_path, "")
-
-    @property
-    def jmap_parent_id(self):
-        return make_mailbox_id(self.parent_path, "")
-
-
-
 def parse_imap_mailboxes(folders: Tuple) -> Dict[str, ImapMailbox]:
     """
     Given a folder 3-tuple from imaplib, returns `Folder` instances.
@@ -640,6 +482,8 @@ def parse_imap_mailboxes(folders: Tuple) -> Dict[str, ImapMailbox]:
 def add_implicit_parent_folders(mailboxes: Dict[str, ImapMailbox]):
     for box in list(mailboxes.values()):
         # There is an implicit parent here, add it
+        if not box.parent_path:
+            continue
         if not box.jmap_parent_id in mailboxes:
-            box = ImapMailbox.from_tuple(([], box.seperator, box.parent_path))
-            mailboxes[box.id] = box
+            box = ImapMailbox.from_tuple(([], box.separator, box.parent_path))
+            mailboxes[box.jmap_id] = box
