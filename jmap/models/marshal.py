@@ -49,7 +49,7 @@ from functools import partial
 from inspect import isclass
 from typing import Union, Dict, List, _ForwardRef, Tuple, Any, Optional
 import marshmallow
-from marshmallow import ValidationError, post_load, fields, post_dump, Schema
+from marshmallow import ValidationError, post_load, fields, post_dump, Schema, pre_dump
 
 from jmap.models.attrs import NOTHING, fields as get_fields, attrs, attrib
 from jmap.models.fields import JmapDateTime
@@ -255,7 +255,7 @@ def make_marshall_func(*, use_server_fields):
         schema.context = {
             'use_server_fields': use_server_fields
         }
-        return schema.dump(get_set_attrs(self))
+        return schema.dump(self)
     return  marshall_func
 
 
@@ -299,6 +299,9 @@ def marshallable(attrclass):
         for field in attr_fields
     }
 
+    def only_set_attrs(self, data):
+        return get_set_attrs(data)
+
     def make_object(self, data):
         # The part where we convert the validated input data into an actual `attr` instance
         # is here, implemented via marshmallow @post_load. That is, marshmallow itself
@@ -325,6 +328,7 @@ def marshallable(attrclass):
     for fieldset in (marshmallow_server_fields, marshmallow_client_fields):
         fieldset['_internal_make_object'] = post_load(make_object)
         fieldset['_internal_post_dump_object'] = post_dump(process_dumped_result, pass_original=True)
+        fieldset['_internal_pre_dump'] = pre_dump(only_set_attrs)
 
     marshmallow_client_schema = type(f'{attrclass}Schema', (marshmallow.Schema,), marshmallow_client_fields)
     marshmallow_server_schema = type(f'{attrclass}Schema', (marshmallow.Schema,), marshmallow_server_fields)

@@ -1,3 +1,5 @@
+from typing import List
+
 import pytest
 from jmap.models.wrap import model, attrib
 
@@ -33,9 +35,9 @@ def test_cannot_set_server_set_props_on_client():
     assert user.to_server() == {}
 
 
-def test_default_props_are_not_serialized_on_the_client():
+def test_default_props_are_not_serialized():
     """
-    CLIENT-SIDE USE:
+    CLIENT-SIDE USE, SERVER-SIDE USE:
 
     `Mailbox.role` is not serialized if it has an implicit default.
     """
@@ -59,6 +61,13 @@ def test_default_props_are_not_serialized_on_the_client():
     assert m.to_client() == {'role': 'foo'}
     assert m.to_server() == {'role': 'foo'}
 
+    # This remains true, even if we use a list [regression]
+    @model
+    class Parent:
+        box: List[Mailbox]
+
+    assert Parent(box=[Mailbox()]).to_client() == {'box': [{}]}
+
 
 def test_can_initialize_without_required_properties():
     """
@@ -78,9 +87,9 @@ def test_can_initialize_without_required_properties():
     # But, the special `properties` constructor does not!
     mailbox = Mailbox.Properties(id='1')
 
-    # So on serialization, only one is set
-    assert mailbox.to_server() == {'id': '1'}
+    # The properties that we skipped are not serialized
     assert mailbox.to_client() == {'id': '1'}
+    assert mailbox.to_server() == {'id': '1'}
 
 
 def test_can_initialize_with_server_side_properties():

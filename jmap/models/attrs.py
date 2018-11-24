@@ -2233,3 +2233,114 @@ def and_(*validators):
         )
 
     return _AndValidator(tuple(vals))
+
+
+def asdict(
+    inst,
+    recurse=True,
+    filter=None,
+    dict_factory=dict,
+    retain_collection_types=False,
+):
+    """
+    Return the ``attrs`` attribute values of *inst* as a dict.
+    Optionally recurse into other ``attrs``-decorated classes.
+    :param inst: Instance of an ``attrs``-decorated class.
+    :param bool recurse: Recurse into classes that are also
+        ``attrs``-decorated.
+    :param callable filter: A callable whose return code determines whether an
+        attribute or element is included (``True``) or dropped (``False``).  Is
+        called with the :class:`attr.Attribute` as the first argument and the
+        value as the second argument.
+    :param callable dict_factory: A callable to produce dictionaries from.  For
+        example, to produce ordered dictionaries instead of normal Python
+        dictionaries, pass in ``collections.OrderedDict``.
+    :param bool retain_collection_types: Do not convert to ``list`` when
+        encountering an attribute whose type is ``tuple`` or ``set``.  Only
+        meaningful if ``recurse`` is ``True``.
+    :rtype: return type of *dict_factory*
+    :raise attr.exceptions.NotAnAttrsClassError: If *cls* is not an ``attrs``
+        class.
+    ..  versionadded:: 16.0.0 *dict_factory*
+    ..  versionadded:: 16.1.0 *retain_collection_types*
+    """
+    attrs = fields(inst.__class__)
+    rv = dict_factory()
+    for a in attrs:
+        v = getattr(inst, a.name)
+        if filter is not None and not filter(a, v):
+            continue
+        if recurse is True:
+            if has(v.__class__):
+                rv[a.name] = asdict(
+                    v, True, filter, dict_factory, retain_collection_types
+                )
+            elif isinstance(v, (tuple, list, set)):
+                cf = v.__class__ if retain_collection_types is True else list
+                rv[a.name] = cf(
+                    [
+                        _asdict_anything(
+                            i, filter, dict_factory, retain_collection_types
+                        )
+                        for i in v
+                    ]
+                )
+            elif isinstance(v, dict):
+                df = dict_factory
+                rv[a.name] = df(
+                    (
+                        _asdict_anything(
+                            kk, filter, df, retain_collection_types
+                        ),
+                        _asdict_anything(
+                            vv, filter, df, retain_collection_types
+                        ),
+                    )
+                    for kk, vv in iteritems(v)
+                )
+            else:
+                rv[a.name] = v
+        else:
+            rv[a.name] = v
+    return rv
+
+
+def _asdict_anything(val, filter, dict_factory, retain_collection_types):
+    """
+    ``asdict`` only works on attrs instances, this works on anything.
+    """
+    if getattr(val.__class__, "__attrs_attrs__", None) is not None:
+        # Attrs class.
+        rv = asdict(val, True, filter, dict_factory, retain_collection_types)
+    elif isinstance(val, (tuple, list, set)):
+        cf = val.__class__ if retain_collection_types is True else list
+        rv = cf(
+            [
+                _asdict_anything(
+                    i, filter, dict_factory, retain_collection_types
+                )
+                for i in val
+            ]
+        )
+    elif isinstance(val, dict):
+        df = dict_factory
+        rv = df(
+            (
+                _asdict_anything(kk, filter, df, retain_collection_types),
+                _asdict_anything(vv, filter, df, retain_collection_types),
+            )
+            for kk, vv in iteritems(val)
+        )
+    else:
+        rv = val
+    return rv
+
+
+def has(cls):
+    """
+    Check whether *cls* is a class with ``attrs`` attributes.
+    :param type cls: Class to introspect.
+    :raise TypeError: If *cls* is not a class.
+    :rtype: :class:`bool`
+    """
+    return getattr(cls, "__attrs_attrs__", None) is not None
