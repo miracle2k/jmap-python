@@ -1,4 +1,4 @@
 from .server import app
 
 
-app.run()
+app.run(threaded=False)
