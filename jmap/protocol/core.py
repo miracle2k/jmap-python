@@ -66,10 +66,13 @@ class JmapBaseModule(JmapModuleInterface):
         if type is Any:
             arg_object = input
         else:
-            try:
-                arg_object = type.from_client(input)
-            except ValidationError as exc:
-                raise JMapInvalidArguments(str(exc))
+            if isinstance(input, dict):
+                try:
+                    arg_object = type.from_client(input)
+                except ValidationError as exc:
+                    raise JMapInvalidArguments(str(exc))
+            else:
+                arg_object = input
 
         return self.methods[method_name](context, arg_object)
 

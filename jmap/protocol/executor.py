@@ -93,16 +93,17 @@ class Executor:
 
         # Resolve any references to previous responses
         args = method_call.args
-        for arg_name in list(args.keys()):
-            if arg_name.startswith('#'):
-                try:
-                    # TODO: Do this earlier during request parsing
-                    ref = ResultReference.from_client(args[arg_name])
-                except ValidationError as exc:
-                    raise JMapNotRequest(str(exc))
-                new_value = resolve_reference(ref, responses_by_client_id)
-                args[arg_name[1:]] = new_value
-                del args[arg_name]
+        if isinstance(args, dict):
+            for arg_name in list(args.keys()):
+                if arg_name.startswith('#'):
+                    try:
+                        # TODO: Do this earlier during request parsing
+                        ref = ResultReference.from_client(args[arg_name])
+                    except ValidationError as exc:
+                        raise JMapNotRequest(str(exc))
+                    new_value = resolve_reference(ref, responses_by_client_id)
+                    args[arg_name[1:]] = new_value
+                    del args[arg_name]
 
         # Execute the call
         try:

@@ -1,39 +1,25 @@
 """
 For testing, a JMAP server.
-
-TODO: Make this SansIO.
 """
 import os
 import dotenv
+
+from jmap.protocol.json import JmapJSONEncoder
+
 dotenv.load_dotenv()
 
-import attr
 from flask import Flask, request, jsonify, url_for
-from flask.json import JSONEncoder
 from flask_cors import CORS, cross_origin
 
-from jmap.protocol.models import JMapRequest, Account, MAIL_URN
-from jmap.protocol.core import CoreModule
-from jmap.protocol.errors import JMapError, JMapRequestError
+from jmap.protocol.models import Account, MAIL_URN
 from jmap.protocol.fallback import FallbackModule
-from jmap.protocol.executor import Executor
 from jmap.server.accounts import StaticBackend
 from jmap.server.fixture import FixtureEmailModule
 from jmap.server.modules.imap import ImapProxyModule
 
 
-class CustomJSONEncoder(JSONEncoder):
-
-    def default(self, obj):
-        if attr.has(type(obj)):
-            if getattr(obj, 'to_client'):
-                return obj.to_client()
-            return attr.asdict(obj)
-        return JSONEncoder.default(self, obj)
-
-
 app = Flask(__name__)
-app.json_encoder = CustomJSONEncoder
+app.json_encoder = JmapJSONEncoder
 CORS(app)
 
 
@@ -97,19 +83,7 @@ def jmap_auth():
 @app.route("/", methods=['POST'])
 @cross_origin(supports_credentials=True)
 def jmap_api():
-    try:
-        jmap_request = JMapRequest.from_json(request.json)
-    except JMapRequestError as exc:
-        return jsonify(exc.to_json())
-
-    executor = Executor(modules=[CoreModule(), email_module, fallback])
-
-    try:
-        jmap_response = executor.execute(jmap_request)
-    except JMapError as exc:
-        return jsonify(exc.to_json())
-
-    return jsonify(jmap_response.to_json())
+    return jsonify(handle_request_from_json(request.json))
 
 
 @app.route("/events", methods=['GET'])
