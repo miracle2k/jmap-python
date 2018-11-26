@@ -1,45 +1,53 @@
 from typing import Dict
-
 from jmap.protocol.errors import JMapRequestError, JMapError
 from jmap.protocol.executor import Executor
 from jmap.protocol.models import JMapRequest
 
 
-def handle_request_from_json(request_json: Dict) -> Dict:
-    """Give a JMAP request structure, such as would be posted to the JMAP
-    API endpoint.
-    """
-    try:
-        jmap_request = JMapRequest.from_json(request_json)
-    except JMapRequestError as exc:
-        return exc.to_json()
-
-    executor = Executor(modules=[CoreModule(), email_module, fallback])
-
-    # should we check the account id now?
-    # pick a client for the guy?
-
-    try:
-        jmap_response = executor.execute(jmap_request)
-    except JMapError as exc:
-        return exc.to_json()
-
-    return jmap_response.to_json()
+SESSION_URL_PATH = '/.well-known/jmap'
 
 
+class Server:
+    def __init__(self, *, modules, api_url, auth_backend):
+        self.modules = modules
+        self.api_url = api_url
+        self.auth_backend = auth_backend
 
-# - you usually create the server on every call; certainly, it is stateless
-# - if you want to create it once, you can, if the modules support that.
-#  - most modules would be written to support that.
-# - the imap module gets the client for each account id
+    def get_session_response(self, context):
+        accounts = self.auth_backend.get_accounts_for(context)
 
-# 1.
+        return {
+            # We can get all of this from the context
+            "username": 'user@domain.com',
+            "primaryAccounts": {},
+            "accounts": {
+                account_id: account.marshal()
+                for account_id, account in accounts.items()
+            },
+            "state": None,
 
-email_module = ImapProxyModule(client=pool.get_client_for_account())
+            # This stuff was passed in the constructor
+            "capabilities": {},
+            "apiUrl": self.api_url,
+            "uploadUrl": '/upload',
+            "downloadUrl": '/download',
+            "eventSourceUrl": '/events',
+        }
 
+    def handle_request_from_json(self, request_json: Dict, *, context) -> Dict:
+        """Give a JMAP request structure, such as would be posted to the JMAP
+        API endpoint.
+        """
+        try:
+            jmap_request = JMapRequest.from_json(request_json)
+        except JMapRequestError as exc:
+            return exc.to_json()
 
-# 2.
+        executor = Executor(modules=self.modules)
 
-mail_module = ImapProxyModule(client_getter)
+        try:
+            jmap_response = executor.execute(jmap_request, context=context)
+        except JMapError as exc:
+            return exc.to_json()
 
-
+        return jmap_response.to_json()
