@@ -1,6 +1,6 @@
 from typing import Dict
 from jmap.models.errors import JMapRequestError, JMapError
-from jmap.models.executor import Executor
+from jmap.executor import Executor
 from jmap.models.models import JMapRequest
 
 
@@ -21,7 +21,7 @@ class Server:
             "username": 'user@domain.com',
             "primaryAccounts": {},
             "accounts": {
-                account_id: account.marshal()
+                account_id: account.to_client()
                 for account_id, account in accounts.items()
             },
             "state": None,

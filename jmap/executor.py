@@ -10,8 +10,8 @@ from marshmallow import ValidationError
 from jmap.modules.core import JmapModuleInterface
 from jmap.models.errors import JMapError, JMapMethodError, JMapUnknownMethod, JMapInvalidResultReference, \
     JMapNotRequest
-from jmap.models.jsonpointer import resolve_pointer, JsonPointerException
-from jmap.models.models import JMapRequest, JMapResponse, ResultReference
+from jmap.jsonpointer import resolve_pointer, JsonPointerException
+from jmap.models import JMapRequest, JMapResponse, ResultReference
 
 
 class MethodNotFound(JMapError):
