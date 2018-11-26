@@ -1,3 +1,6 @@
+from jmap.attrs import attrs
+
+
 class AsObject:
     def __init__(self, obj):
         self.obj = obj
@@ -33,3 +36,7 @@ def get_set_attrs(instance):
         # marshmallow can handle both, but our custom code should have a
         # common interface as well.
         return AsObject(instance.__dict__)
+
+
+def properties(instance):
+    return attrs.fields_dict(instance).keys()

@@ -23,6 +23,7 @@ import marshmallow
 from marshmallow import ValidationError
 
 from jmap.attrs import model, attrib, Factory, fields
+from jmap.attrs.utils import properties
 from jmap.models.errors import JMapNotRequest
 from jmap.attrs.marshal import custom_marshal, snakecase, \
     make_marshmallow_field_from_python_type, to_camel_case, Missing
@@ -502,7 +503,7 @@ class StandardSetResponse:
 
 
 @model
-class MailboxGetArgs(StandardGetArgs, type=Mailbox, default_props=[]):
+class MailboxGetArgs(StandardGetArgs, type=Mailbox, default_props=properties(Mailbox)):
     pass
 
 
