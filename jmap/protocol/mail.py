@@ -58,7 +58,7 @@ class EmailModule(JmapBaseModule):
     def handle_mailbox_changes(self, context, args: MailboxChangesArgs) -> MailboxChangesResponse:
         raise NotImplementedError()
 
-    def handle_email_set(self, context, args: MailboxSetArgs) -> MailboxSetResponse:
+    def handle_mailbox_set(self, context, args: MailboxSetArgs) -> MailboxSetResponse:
         raise NotImplementedError()
 
     def handle_email_get(self, context, args: EmailGetArgs) -> EmailGetResponse:

@@ -56,7 +56,7 @@ class Executor:
         # Map all method names to modules
         self.available_methods = {method: m for m in modules for method in m.get_methods()}
 
-    def execute(self, request: JMapRequest):
+    def execute(self, request: JMapRequest, *, context):
         method_responses = []
 
         # Keep previous responses to allow references
@@ -64,7 +64,11 @@ class Executor:
 
         for method_call in request.method_calls:
             try:
-                result = self.execute_method(method_call, responses_by_client_id=responses_by_client_id)
+                result = self.execute_method(
+                    method_call,
+                    responses_by_client_id=responses_by_client_id,
+                    context=context
+                )
             except JMapMethodError as exc:
                 response_name = 'error'
                 response_data = exc.to_json()
@@ -85,7 +89,7 @@ class Executor:
 
         return JMapResponse(method_responses=method_responses)
 
-    def execute_method(self, method_call, *, responses_by_client_id):
+    def execute_method(self, method_call, *, responses_by_client_id, context):
         # Find the right module
         if not method_call.name in self.available_methods:
             raise MethodNotFound(method_call.name)
@@ -107,6 +111,6 @@ class Executor:
 
         # Execute the call
         try:
-            return module.execute(method_call.name, args)
+            return module.execute(method_call.name, args, context=context)
         except NotImplementedError:
             raise JMapUnknownMethod("This method is not implemented.")
