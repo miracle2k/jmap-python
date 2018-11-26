@@ -3,7 +3,7 @@ Data from https://github.com/jmapio/jmap-demo-webmail/blob/master/fixtures.js
 """
 
 import datetime
-from jmap.protocol.mail import EmailModule
+from jmap.modules.mail import EmailModule
 
 
 class FixtureEmailModule(EmailModule):

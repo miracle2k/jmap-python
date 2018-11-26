@@ -7,11 +7,11 @@ from typing import List, Dict, Any
 
 from marshmallow import ValidationError
 
-from jmap.protocol.core import JmapModuleInterface
-from jmap.protocol.errors import JMapError, JMapMethodError, JMapUnknownMethod, JMapInvalidResultReference, \
+from jmap.modules.core import JmapModuleInterface
+from jmap.models.errors import JMapError, JMapMethodError, JMapUnknownMethod, JMapInvalidResultReference, \
     JMapNotRequest
-from jmap.protocol.jsonpointer import resolve_pointer, JsonPointerException
-from jmap.protocol.models import JMapRequest, JMapResponse, ResultReference
+from jmap.models.jsonpointer import resolve_pointer, JsonPointerException
+from jmap.models.models import JMapRequest, JMapResponse, ResultReference
 
 
 class MethodNotFound(JMapError):

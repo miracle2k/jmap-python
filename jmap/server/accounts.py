@@ -3,7 +3,7 @@ Different backends to get accounts from.
 """
 
 from typing import Dict
-from jmap.protocol.models import Account
+from jmap.models.models import Account
 
 
 class AccountBackend:
@@ -21,9 +21,25 @@ class AccountBackend:
         return False
 
 
-class StaticBackend(AccountBackend):
+class SingleUser(AccountBackend):
     """
     A static list of accounts. Permission is always granted.
+    """
+
+    def __init__(self, accounts: Dict[str, Account]):
+        self.accounts = accounts
+
+    def get_accounts_for(self, context) -> Dict[str, Account]:
+        return self.accounts
+
+    def can_read(self, context, objecttype, objectid):
+        return True
+
+
+class TomlBackend(AccountBackend):
+    """
+    [account=foo]
+    imap_host=1
     """
 
     def __init__(self, accounts: Dict[str, Account]):

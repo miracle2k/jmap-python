@@ -1,4 +1,4 @@
-from jmap.protocol.jsonpointer import resolve_pointer
+from jmap.jsonpointer import resolve_pointer
 
 
 def test_wildcard_to_int():

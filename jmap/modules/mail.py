@@ -10,8 +10,8 @@ What this does is:
 
 import functools
 import types
-from jmap.protocol.core import JmapBaseModule
-from jmap.protocol.models import MailboxGetArgs, EmailQueryArgs, EmailQueryResponse, EmailGetResponse, EmailGetArgs, \
+from jmap.modules.core import JmapBaseModule
+from jmap.models.models import MailboxGetArgs, EmailQueryArgs, EmailQueryResponse, EmailGetResponse, EmailGetArgs, \
     ThreadGetArgs, ThreadGetResponse, MailboxQueryArgs, MailboxQueryResponse, MailboxChangesArgs, \
     MailboxChangesResponse, ThreadChangesArgs, ThreadChangesResponse, EmailSetResponse, EmailSetArgs, MailboxSetArgs, \
     MailboxSetResponse

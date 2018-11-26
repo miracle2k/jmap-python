@@ -1,7 +1,7 @@
 from typing import List
 
 import pytest
-from jmap.models.wrap import model, attrib
+from jmap.attrs.wrap import model, attrib
 
 
 def test_cannot_set_server_set_props_on_client():

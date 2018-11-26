@@ -51,9 +51,9 @@ from typing import Union, Dict, List, _ForwardRef, Tuple, Any, Optional
 import marshmallow
 from marshmallow import ValidationError, post_load, fields, post_dump, Schema, pre_dump
 
-from jmap.models.attrs import NOTHING, fields as get_fields, attrs, attrib
-from jmap.models.fields import JmapDateTime
-from jmap.models.utils import get_set_attrs
+from jmap.attrs.attrs import NOTHING, fields as get_fields, attrs, attrib
+from jmap.attrs.fields import JmapDateTime
+from jmap.attrs.utils import get_set_attrs
 
 
 NoneType = type(None)

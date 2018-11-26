@@ -1,6 +1,6 @@
 import datetime
 from marshmallow import fields
-from jmap.models import rfc3339
+from jmap.attrs import rfc3339
 
 
 def serialize_rfc3339(date, localtime=True):

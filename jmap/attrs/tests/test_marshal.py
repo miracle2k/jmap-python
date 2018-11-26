@@ -4,7 +4,7 @@ Test our custom marshmallow based system to validate input.
 import enum
 import pytest
 from marshmallow import ValidationError, fields, Schema
-from jmap.models import model, attrib
+from jmap.attrs import model, attrib
 from ..marshal import custom_marshal, PolyField
 from typing import Optional, List, Dict, Union
 

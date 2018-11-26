@@ -4,7 +4,7 @@ from datetime import datetime
 import pytest
 from marshmallow import ValidationError
 
-from jmap.protocol.models import Email, HeaderFieldQuery, EmailBodyPart, \
+from jmap.models.models import Email, HeaderFieldQuery, EmailBodyPart, \
     EmailGetArgs, HeaderFieldForm, QueriedHeaderField
 
 

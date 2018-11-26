@@ -1,7 +1,7 @@
 from typing import Dict
-from jmap.protocol.errors import JMapRequestError, JMapError
-from jmap.protocol.executor import Executor
-from jmap.protocol.models import JMapRequest
+from jmap.models.errors import JMapRequestError, JMapError
+from jmap.models.executor import Executor
+from jmap.models.models import JMapRequest
 
 
 SESSION_URL_PATH = '/.well-known/jmap'

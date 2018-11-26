@@ -1,9 +1,9 @@
 import datetime
 import mailbox
 
-from jmap.protocol.mail import EmailModule
-from jmap.protocol.models import MailboxGetArgs, MailboxGetResponse, Mailbox, EmailQueryArgs, EmailQueryResponse, \
-    EmailGetArgs, EmailGetResponse, ThreadGetArgs, ThreadGetResponse, Thread
+from jmap.modules.mail import EmailModule
+from jmap.models.models import MailboxGetArgs, MailboxGetResponse, Mailbox, EmailQueryArgs, EmailQueryResponse, \
+    EmailGetArgs, EmailGetResponse, ThreadGetArgs, ThreadGetResponse
 
 
 class MailboxEmailModule(EmailModule):

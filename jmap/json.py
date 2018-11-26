@@ -1,5 +1,5 @@
 from json import JSONEncoder
-from jmap.models import attrs
+from jmap.attrs import attrs
 
 
 class JmapJSONEncoder(JSONEncoder):

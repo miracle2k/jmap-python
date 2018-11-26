@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 from marshmallow import ValidationError
 
-from jmap.protocol.errors import JMapError, JMapInvalidArguments
+from jmap.models.errors import JMapError, JMapInvalidArguments
 
 
 class JmapModuleInterface:

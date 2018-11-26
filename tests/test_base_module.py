@@ -1,9 +1,9 @@
 import pytest
 
-from jmap.protocol.errors import JMapInvalidArguments
-from jmap.protocol.mail import EmailModule
-from jmap.protocol.models import MailboxGetArgs
-from jmap.server.accounts import StaticBackend
+from jmap.models.errors import JMapInvalidArguments
+from jmap.modules.mail import EmailModule
+from jmap.models.models import MailboxGetArgs
+from jmap.server.accounts import SingleUser
 
 
 def test_email():
@@ -16,4 +16,4 @@ def test_email():
     with pytest.raises(JMapInvalidArguments):
         Module().execute('Mailbox/get', {})
 
-    Module(auth_backend=StaticBackend(accounts={})).execute('Mailbox/get', {'accountId': 'test'})
+    Module(auth_backend=SingleUser(accounts={})).execute('Mailbox/get', {'accountId': 'test'})

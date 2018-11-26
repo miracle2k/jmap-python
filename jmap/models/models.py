@@ -22,9 +22,9 @@ from typing import Dict, Any, List, Optional, Union
 import marshmallow
 from marshmallow import ValidationError
 
-from jmap.models import model, attrib, Factory, fields
-from jmap.protocol.errors import JMapNotRequest
-from jmap.models.marshal import custom_marshal, snakecase, \
+from jmap.attrs import model, attrib, Factory, fields
+from jmap.models.errors import JMapNotRequest
+from jmap.attrs.marshal import custom_marshal, snakecase, \
     make_marshmallow_field_from_python_type, to_camel_case, Missing
 
 
