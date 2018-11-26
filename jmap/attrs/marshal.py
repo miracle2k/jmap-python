@@ -47,7 +47,7 @@ from collections import Counter
 from datetime import datetime
 from functools import partial
 from inspect import isclass
-from typing import Union, Dict, List, _ForwardRef, Tuple, Any, Optional
+from typing import Union, Dict, List, ForwardRef, Tuple, Any, Optional
 import marshmallow
 from marshmallow import ValidationError, post_load, fields, post_dump, Schema, pre_dump
 
@@ -107,7 +107,7 @@ def get_marshmallow_field_class_from_mypy_annotation(mypy_type) -> Tuple[Any, Di
     # If a forward reference is given, use the forward reference system of
     # marshmallow. Return a fields.Nested field class with the target type
     # given as a string.
-    if isinstance(mypy_type, _ForwardRef):
+    if isinstance(mypy_type, ForwardRef):
         return CustomNested, {'nested': mypy_type.__forward_arg__}
 
     # Any types we read as "Raw"
